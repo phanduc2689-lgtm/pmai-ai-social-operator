@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Vite root is apps/desktop — must scan monorepo src or utilities never emit. */
+@source "./**/*.{ts,tsx}";
+@source "../apps/desktop/**/*.{ts,tsx,html}";
+
 @theme {
   --color-bg: #f1eee6;
   --color-surface: #fbfaf6;
@@ -24,34 +28,48 @@
   --color-code-fg: #e8e4d9;
   --color-gold-doc: #8a6a2a;
 
-  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --font-serif: "Newsreader", "Liberation Serif", Georgia, serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --font-sans: "Segoe UI", system-ui, sans-serif;
+  --font-serif: Georgia, "Liberation Serif", serif;
+  --font-mono: ui-monospace, Consolas, monospace;
 
   --radius-xs: 4px;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 18px;
   --radius-xl: 28px;
-
-  --shadow-panel: 0 1px 0 color-mix(in oklab, #1c1b19 8%, transparent),
-    0 12px 32px -18px color-mix(in oklab, #1c1b19 28%, transparent);
 }
 
 @layer base {
-  html {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  html,
+  body,
+  #root {
+    margin: 0;
+    min-height: 100%;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+  }
+  body {
+    overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
-  body {
-    background: var(--color-bg);
-    color: var(--color-fg);
-    font-family: var(--font-sans);
-    overflow-x: hidden;
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  img,
+  svg {
+    max-width: 100%;
+    display: block;
   }
   :focus-visible {
     outline: 2px solid var(--color-accent);
@@ -59,21 +77,218 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+/* Fallback layout — works even if Tailwind utilities fail to emit. */
+.pmai-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+.pmai-aside {
+  display: none;
+  width: 232px;
+  flex-shrink: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+@media (min-width: 880px) {
+  .pmai-aside {
+    display: flex;
   }
 }
-
-.article-body p {
-  text-wrap: pretty;
+.pmai-brand {
+  display: flex;
+  height: 64px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--color-border);
 }
-
-h1,
-h2,
-h3 {
-  text-wrap: balance;
+.pmai-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+}
+.pmai-nav-btn {
+  display: flex;
+  height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+}
+.pmai-nav-btn.is-on {
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+.pmai-nav-btn:not(.is-on):hover {
+  background: var(--color-info-bg);
+}
+.pmai-col {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.pmai-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.pmai-lights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.pmai-light {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+.pmai-dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--color-subtle);
+}
+.pmai-dot.is-ok {
+  background: var(--color-ok);
+}
+.pmai-live {
+  margin: 0;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+}
+.pmai-live.is-ok {
+  background: var(--color-ok-bg);
+  color: var(--color-ok);
+}
+.pmai-live.is-warn {
+  background: var(--color-warn-bg);
+  color: var(--color-warn);
+}
+.pmai-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+@media (min-width: 880px) {
+  .pmai-tabs {
+    display: none;
+  }
+}
+.pmai-tab {
+  height: 40px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--color-surface);
+  font-size: 12px;
+}
+.pmai-tab.is-on {
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+.pmai-main {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 20px 48px;
+}
+.pmai-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1;
+}
+.pmai-logo svg {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+.pmai-logo-word {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+.pmai-card {
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  padding: 20px;
+}
+.pmai-btn {
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+.pmai-btn:disabled {
+  opacity: 0.4;
+}
+.pmai-btn-ghost {
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+}
+.pmai-steps {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0 0;
+}
+@media (min-width: 720px) {
+  .pmai-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.pmai-step {
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  padding: 16px;
+}
+.pmai-step-n {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-subtle);
+}
+.pmai-hint {
+  color: var(--color-muted);
+  font-size: 14px;
+  line-height: 1.5;
 }

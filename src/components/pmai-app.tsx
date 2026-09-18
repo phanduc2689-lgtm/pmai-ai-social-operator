@@ -20,11 +20,11 @@ const NAV: { id: NavId; label: string; icon: typeof LayoutDashboard }[] = [
 
 function Light({ label, ok, text }: { label: string; ok: boolean; text: string }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-surface px-3 py-2">
-      <span className={`size-2.5 shrink-0 rounded-full ${ok ? "bg-ok" : "bg-subtle"}`} />
-      <div className="min-w-0">
-        <p className="font-sans text-[10px] tracking-wide text-subtle uppercase">{label}</p>
-        <p className="truncate font-sans text-xs font-medium">{text}</p>
+    <div className="pmai-light">
+      <span className={`pmai-dot ${ok ? "is-ok" : ""}`} />
+      <div style={{ minWidth: 0 }}>
+        <p style={{ margin: 0, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--color-subtle)" }}>{label}</p>
+        <p style={{ margin: 2, fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</p>
       </div>
     </div>
   );
@@ -62,9 +62,7 @@ function ChromeLiveBar() {
       stop = true;
     };
   }, []);
-  return (
-    <p className={`border-b border-border px-4 py-1.5 font-sans text-[11px] md:px-8 ${ok ? "bg-ok-bg text-ok" : "bg-warn-bg text-warn"}`}>{line}</p>
-  );
+  return <p className={`pmai-live ${ok ? "is-ok" : "is-warn"}`}>{line}</p>;
 }
 
 export function PmaiApp() {
@@ -72,10 +70,10 @@ export function PmaiApp() {
   useEffect(() => setMounted(true), []);
   if (!mounted) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-bg text-fg">
-        <div className="text-center">
-          <PmaiLogo className="mx-auto h-10" />
-          <p className="mt-4 font-sans text-sm text-muted">Đang mở PMAI…</p>
+      <div className="pmai-shell" style={{ alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center" }}>
+          <PmaiLogo />
+          <p className="pmai-hint">Đang mở PMAI…</p>
         </div>
       </div>
     );
@@ -91,39 +89,36 @@ function PmaiShell() {
   const firstRun = snap.firstRunStep < 4;
 
   return (
-    <div className="flex min-h-screen overflow-x-hidden bg-bg text-fg">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface md:flex">
-        <div className="flex h-16 items-center border-b border-border px-4">
-          <PmaiLogo className="h-8" />
+    <div className="pmai-shell">
+      <aside className="pmai-aside">
+        <div className="pmai-brand">
+          <PmaiLogo />
         </div>
-        <nav className="flex flex-1 flex-col gap-1 p-3">
+        <nav className="pmai-nav">
           {NAV.map((item) => {
             const Icon = item.icon;
             const on = nav === item.id;
             const badge = item.id === "approve" ? pendingApprovals.length : item.id === "logs" ? needsCheck.length : 0;
             return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setNav(item.id)}
-                className={`flex h-11 items-center gap-2 rounded-md px-3 font-sans text-sm ${on ? "bg-accent text-accent-fg" : "hover:bg-info-bg"}`}
-              >
-                <Icon className="size-4" strokeWidth={1.75} />
-                <span className="flex-1 text-left">{item.label}</span>
-                {badge > 0 ? <span className="rounded-full bg-danger px-1.5 font-sans text-[10px] text-white">{badge}</span> : null}
+              <button key={item.id} type="button" onClick={() => setNav(item.id)} className={`pmai-nav-btn ${on ? "is-on" : ""}`}>
+                <Icon size={16} strokeWidth={1.75} />
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {badge > 0 ? (
+                  <span style={{ background: "var(--color-danger)", color: "#fff", borderRadius: 999, padding: "1px 7px", fontSize: 10 }}>{badge}</span>
+                ) : null}
               </button>
             );
           })}
         </nav>
-        <p className="px-4 py-3 font-sans text-[10px] text-subtle">MVP1 · một operator · local</p>
+        <p style={{ padding: "12px 16px", fontSize: 11, color: "var(--color-subtle)" }}>MVP1 · một operator · local</p>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex flex-wrap items-center gap-2 border-b border-border bg-surface px-3 py-3 md:px-6">
-          <span className="md:hidden">
-            <PmaiLogo className="h-7" />
+      <div className="pmai-col">
+        <header className="pmai-header">
+          <span className="pmai-tabs" style={{ display: "inline-flex", border: 0, padding: 0 }}>
+            <PmaiLogo />
           </span>
-          <div className="grid min-w-0 flex-1 grid-cols-3 gap-2">
+          <div className="pmai-lights">
             <Light label="Hồ sơ trình duyệt" ok={lights.profile === "RUNNING"} text={snap.profile?.name ?? "Chưa có"} />
             <Light
               label="Phiên Facebook"
@@ -135,22 +130,21 @@ function PmaiShell() {
         </header>
         <ChromeLiveBar />
 
-        <div className="flex gap-1 overflow-x-auto border-b border-border px-2 py-2 md:hidden">
+        <div className="pmai-tabs">
           {NAV.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setNav(item.id)}
-              className={`h-10 shrink-0 rounded-md px-3 font-sans text-xs ${nav === item.id ? "bg-accent text-accent-fg" : "bg-surface"}`}
-            >
+            <button key={item.id} type="button" onClick={() => setNav(item.id)} className={`pmai-tab ${nav === item.id ? "is-on" : ""}`}>
               {item.label}
             </button>
           ))}
         </div>
 
-        {toast ? <div className="mx-4 mt-3 rounded-md border border-danger/30 bg-danger-bg px-3 py-2 font-sans text-sm text-danger">{toast}</div> : null}
+        {toast ? (
+          <div style={{ margin: "12px 16px 0", padding: "10px 12px", borderRadius: 8, background: "var(--color-danger-bg)", color: "var(--color-danger)", fontSize: 14 }}>
+            {toast}
+          </div>
+        ) : null}
 
-        <main id="noi-dung" className="min-w-0 flex-1 overflow-x-hidden px-4 py-6 md:px-8">
+        <main id="noi-dung" className="pmai-main">
           {firstRun && nav === "home" ? (
             <FirstRun api={api} />
           ) : nav === "home" ? (
@@ -169,7 +163,11 @@ function PmaiShell() {
             <SettingsScreen api={api} />
           )}
         </main>
-        {busy ? <div className="pointer-events-none fixed bottom-4 right-4 rounded-md bg-accent px-3 py-2 font-sans text-xs text-accent-fg">Đang xử lý…</div> : null}
+        {busy ? (
+          <div style={{ position: "fixed", right: 16, bottom: 16, background: "var(--color-accent)", color: "var(--color-accent-fg)", padding: "8px 12px", borderRadius: 8, fontSize: 12 }}>
+            Đang xử lý…
+          </div>
+        ) : null}
         {!gate.ok && !firstRun ? <p className="sr-only">CTA Tạo bài đăng disabled: {gate.reason}</p> : null}
       </div>
     </div>

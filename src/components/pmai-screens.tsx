@@ -12,50 +12,65 @@ export function Dashboard({
 }) {
   const { snap, gate, pendingApprovals, needsCheck } = api;
   return (
-    <section className="mx-auto max-w-3xl">
-      <h1 className="font-serif text-3xl">Tổng quan</h1>
-      <div className="mt-6 flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={onCompose}
-          disabled={!gate.ok}
-          className="h-12 rounded-md bg-accent px-5 font-sans text-sm font-medium text-accent-fg disabled:opacity-40"
-        >
-          Tạo bài đăng
-        </button>
-        {!gate.ok ? <p className="self-center font-sans text-sm text-muted">{gate.reason}</p> : null}
+    <section style={{ maxWidth: 860, margin: "0 auto" }}>
+      <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 32, margin: 0 }}>Làm gì tiếp theo</h1>
+      <p className="pmai-hint" style={{ marginTop: 8 }}>
+        Chrome đã login xong. Luồng chuẩn: chọn trang → soạn nháp → duyệt → PMAI đăng trên Chrome.
+      </p>
+
+      <div className="pmai-steps">
+        <div className="pmai-step">
+          <p className="pmai-step-n">Bước 1</p>
+          <h2 style={{ margin: "6px 0 8px", fontSize: 18 }}>Chọn trang đích</h2>
+          <p className="pmai-hint">Trang Facebook sẽ nhận bài. Nếu chưa có, mở Tài khoản để thêm URL Page.</p>
+          <p style={{ marginTop: 12, fontWeight: 600 }}>{snap.pages.find((p) => p.id === snap.selectedPageId)?.name ?? "Chưa chọn trang"}</p>
+        </div>
+        <div className="pmai-step">
+          <p className="pmai-step-n">Bước 2</p>
+          <h2 style={{ margin: "6px 0 8px", fontSize: 18 }}>Soạn bản nháp</h2>
+          <p className="pmai-hint">AI chỉ viết local. Chrome chưa mở composer cho đến khi bạn duyệt.</p>
+          <button type="button" className="pmai-btn" style={{ marginTop: 12 }} onClick={onCompose} disabled={!gate.ok}>
+            Tạo bài đăng
+          </button>
+          {!gate.ok ? <p className="pmai-hint" style={{ marginTop: 8 }}>{gate.reason}</p> : null}
+        </div>
+        <div className="pmai-step">
+          <p className="pmai-step-n">Bước 3</p>
+          <h2 style={{ margin: "6px 0 8px", fontSize: 18 }}>Duyệt rồi đăng</h2>
+          <p className="pmai-hint">Human approval bắt buộc. Sau duyệt, PMAI gõ + đăng trên Chrome đã gắn.</p>
+          <button type="button" className="pmai-btn-ghost" style={{ marginTop: 12 }} onClick={onApprove}>
+            Mở hàng duyệt ({pendingApprovals.length})
+          </button>
+        </div>
       </div>
-      <div className="mt-8 grid gap-4 sm:grid-cols-3">
+
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginTop: 24 }}>
         {[
           ["Chờ duyệt", pendingApprovals.length],
-          ["Cần kiểm tra kết quả", needsCheck.length],
+          ["Cần kiểm tra", needsCheck.length],
           ["Đã đăng", snap.tasks.filter((t) => t.status === "SUCCESS").length],
         ].map(([k, v]) => (
-          <div key={String(k)} className="rounded-xl border border-border bg-surface p-4">
-            <p className="font-sans text-xs text-subtle uppercase">{k}</p>
-            <p className="mt-2 font-serif text-3xl">{v}</p>
+          <div key={String(k)} className="pmai-card">
+            <p className="pmai-step-n">{k}</p>
+            <p style={{ fontFamily: "var(--font-serif)", fontSize: 32, margin: "8px 0 0" }}>{v}</p>
           </div>
         ))}
       </div>
+
       {needsCheck.length ? (
-        <div className="mt-6 rounded-xl border border-warn/40 bg-warn-bg p-4">
-          <p className="font-sans text-sm font-medium text-warn">Cần kiểm tra kết quả — bài có thể đã lên</p>
+        <div className="pmai-card" style={{ marginTop: 20, background: "var(--color-warn-bg)" }}>
+          <p style={{ margin: 0, fontWeight: 600, color: "var(--color-warn)" }}>Cần kiểm tra kết quả — bài có thể đã lên</p>
           {needsCheck.map((t) => (
-            <div key={t.id} className="mt-3 flex flex-wrap gap-2">
-              <button type="button" className="h-11 rounded-md bg-accent px-3 text-sm text-accent-fg" onClick={() => api.confirm(t.id, true)}>
+            <div key={t.id} style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+              <button type="button" className="pmai-btn" onClick={() => api.confirm(t.id, true)}>
                 Đã thấy bài
               </button>
-              <button type="button" className="h-11 rounded-md border border-border px-3 text-sm" onClick={() => api.confirm(t.id, false)}>
+              <button type="button" className="pmai-btn-ghost" onClick={() => api.confirm(t.id, false)}>
                 Không thấy bài
               </button>
             </div>
           ))}
         </div>
-      ) : null}
-      {pendingApprovals.length ? (
-        <button type="button" onClick={onApprove} className="mt-6 font-sans text-sm text-accent underline">
-          Có {pendingApprovals.length} bài chờ duyệt
-        </button>
       ) : null}
     </section>
   );
@@ -75,19 +90,20 @@ export function Compose({
   const draft = snap.contents.find((c) => c.id === draftId) ?? snap.contents[0];
 
   return (
-    <section className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-2">
+    <section style={{ display: "grid", gap: 24, maxWidth: 980, margin: "0 auto" }} className="lg:grid-cols-2">
       <div>
-        <h1 className="font-serif text-3xl">Tạo bài đăng</h1>
-        <p className="mt-2 text-sm text-muted">AI soạn nháp local. Trình duyệt Facebook chỉ mở sau khi duyệt.</p>
+        <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 32, margin: 0 }}>Tạo bài đăng</h1>
+        <p className="pmai-hint" style={{ marginTop: 8 }}>AI soạn nháp local. Trình duyệt Facebook chỉ mở sau khi duyệt.</p>
         <textarea
-          className="mt-4 min-h-32 w-full rounded-md border border-border bg-surface p-3 font-sans text-sm"
+          style={{ marginTop: 16, minHeight: 120, width: "100%", borderRadius: 8, border: "1px solid var(--color-border)", padding: 12, font: "inherit" }}
           value={brief}
           onChange={(e) => setBrief(e.target.value)}
         />
         <button
           type="button"
+          className="pmai-btn"
+          style={{ marginTop: 12 }}
           disabled={!gate.ok}
-          className="mt-3 h-12 rounded-md bg-accent px-5 text-sm font-medium text-accent-fg disabled:opacity-40"
           onClick={async () => {
             const c = await api.createDraft(brief);
             if (c) setDraftId(c.id);
@@ -95,45 +111,45 @@ export function Compose({
         >
           Soạn bản nháp
         </button>
-        {!gate.ok ? <p className="mt-2 text-sm text-muted">{gate.reason}</p> : null}
+        {!gate.ok ? <p className="pmai-hint" style={{ marginTop: 8 }}>{gate.reason}</p> : null}
       </div>
-      <div className="rounded-xl border border-border bg-surface p-5">
+      <div className="pmai-card">
         {draft ? (
           <>
-            <p className="font-sans text-xs text-subtle uppercase">Bản nháp AI · {draft.status}</p>
+            <p className="pmai-step-n">Bản nháp AI · {draft.status}</p>
             <textarea
-              className="mt-3 min-h-48 w-full rounded-md border border-border p-3 font-serif text-base"
+              style={{ marginTop: 12, minHeight: 180, width: "100%", borderRadius: 8, border: "1px solid var(--color-border)", padding: 12, fontFamily: "var(--font-serif)", fontSize: 16 }}
               value={draft.body}
               onChange={(e) => api.updateDraft(draft.id, e.target.value, draft.media)}
             />
             {draft.unverifiedClaims.length ? (
-              <ul className="mt-3 space-y-1 rounded-md bg-warn-bg p-3 text-sm text-warn">
+              <ul style={{ marginTop: 12, padding: 12, background: "var(--color-warn-bg)", color: "var(--color-warn)", borderRadius: 8 }}>
                 {draft.unverifiedClaims.map((c) => (
                   <li key={c}>Chưa xác minh — {c}</li>
                 ))}
               </ul>
             ) : null}
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <label className="inline-flex h-11 cursor-pointer items-center rounded-md border border-border px-3 text-sm">
+            <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+              <label className="pmai-btn-ghost" style={{ cursor: "pointer" }}>
                 Thêm ảnh local
                 <input
                   type="file"
                   accept="image/*"
-                  className="hidden"
+                  style={{ display: "none" }}
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     if (f) api.addImage(draft.id, { name: f.name, size: f.size, mimeType: f.type || "image/jpeg" });
                   }}
                 />
               </label>
-              <span className="text-xs text-muted">{draft.media.map((m) => m.name).join(", ") || "Chưa có ảnh"}</span>
+              <span className="pmai-hint">{draft.media.map((m) => m.name).join(", ") || "Chưa có ảnh"}</span>
             </div>
-            <button type="button" className="mt-4 h-12 rounded-md bg-accent px-5 text-sm font-medium text-accent-fg" onClick={() => api.submit(draft.id)}>
+            <button type="button" className="pmai-btn" style={{ marginTop: 16 }} onClick={() => api.submit(draft.id)}>
               Gửi duyệt
             </button>
           </>
         ) : (
-          <p className="text-sm text-muted">Chưa có bản nháp.</p>
+          <p className="pmai-hint">Chưa có bản nháp.</p>
         )}
       </div>
     </section>
@@ -144,26 +160,26 @@ export function Approve({ api }: { api: ReturnType<typeof usePmai> }) {
   const { snap } = api;
   const items = snap.approvals.filter((a) => a.status === "PENDING" || a.status === "APPROVED");
   return (
-    <section className="mx-auto max-w-2xl">
-      <h1 className="font-serif text-3xl">Duyệt</h1>
-      {items.length === 0 ? <p className="mt-4 text-sm text-muted">Không có yêu cầu. Hàng đợi trống là tin tốt.</p> : null}
-      <ul className="mt-6 space-y-4">
+    <section style={{ maxWidth: 680, margin: "0 auto" }}>
+      <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 32, margin: 0 }}>Duyệt</h1>
+      {items.length === 0 ? <p className="pmai-hint" style={{ marginTop: 16 }}>Không có yêu cầu. Hàng đợi trống là tin tốt.</p> : null}
+      <ul style={{ listStyle: "none", padding: 0, margin: "24px 0 0", display: "grid", gap: 16 }}>
         {items.map((a) => {
           const c = snap.contents.find((x) => x.id === a.contentId);
           const t = snap.tasks.find((x) => x.id === a.taskId);
           const page = snap.pages.find((p) => p.id === a.pageTargetId);
           return (
-            <li key={a.id} className="rounded-xl border border-border bg-surface p-5">
-              <p className="text-xs text-subtle">
+            <li key={a.id} className="pmai-card">
+              <p className="pmai-step-n">
                 {page?.name} · {a.status} · hash {a.contentRevisionHash.slice(0, 8)}
               </p>
-              <p className="mt-3 whitespace-pre-wrap font-serif text-lg">{c?.body}</p>
-              {c?.unverifiedClaims.length ? <p className="mt-2 text-sm text-warn">Chưa xác minh: {c.unverifiedClaims.join(" · ")}</p> : null}
+              <p style={{ marginTop: 12, whiteSpace: "pre-wrap", fontFamily: "var(--font-serif)", fontSize: 18 }}>{c?.body}</p>
+              {c?.unverifiedClaims.length ? <p style={{ marginTop: 8, color: "var(--color-warn)" }}>Chưa xác minh: {c.unverifiedClaims.join(" · ")}</p> : null}
               {a.status === "PENDING" ? (
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8 }}>
                   <button
                     type="button"
-                    className="h-11 rounded-md bg-accent px-4 text-sm text-accent-fg"
+                    className="pmai-btn"
                     onClick={async () => {
                       await api.decide(a.id, "APPROVE");
                       if (t) await api.execute(t.id);
@@ -171,24 +187,24 @@ export function Approve({ api }: { api: ReturnType<typeof usePmai> }) {
                   >
                     Duyệt & cho phép đăng
                   </button>
-                  <button type="button" className="h-11 rounded-md border border-border px-4 text-sm" onClick={() => api.decide(a.id, "REJECT")}>
+                  <button type="button" className="pmai-btn-ghost" onClick={() => api.decide(a.id, "REJECT")}>
                     Từ chối bài này
                   </button>
-                  <button type="button" className="h-11 rounded-md border border-border px-4 text-sm" onClick={() => api.decide(a.id, "CANCEL")}>
+                  <button type="button" className="pmai-btn-ghost" onClick={() => api.decide(a.id, "CANCEL")}>
                     Hủy task
                   </button>
                   {c ? (
-                    <button type="button" className="h-11 rounded-md border border-border px-4 text-sm" onClick={() => api.clone(c.id)}>
+                    <button type="button" className="pmai-btn-ghost" onClick={() => api.clone(c.id)}>
                       Nhân bản để sửa
                     </button>
                   ) : null}
                 </div>
               ) : t?.status === "QUEUED" ? (
-                <button type="button" className="mt-4 h-11 rounded-md bg-accent px-4 text-sm text-accent-fg" onClick={() => t && api.execute(t.id)}>
+                <button type="button" className="pmai-btn" style={{ marginTop: 16 }} onClick={() => t && api.execute(t.id)}>
                   Chạy đăng trên Chrome
                 </button>
               ) : (
-                <p className="mt-3 text-sm">
+                <p className="pmai-hint" style={{ marginTop: 12 }}>
                   Task: {t?.status}
                   {t?.permalink ? ` · ${t.permalink}` : ""}
                 </p>
