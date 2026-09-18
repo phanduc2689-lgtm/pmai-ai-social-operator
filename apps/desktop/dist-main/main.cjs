@@ -73,7 +73,7 @@ function handleOnce(channel, fn) {
   try {
     ipcMain.removeHandler(channel);
   } catch {
-    /* not registered */
+    /* ignore */
   }
   ipcMain.handle(channel, fn);
 }
@@ -142,7 +142,7 @@ function registerIpc() {
   for (const ch of ALLOWLIST) {
     handleOnce(ch, async () => ({
       ok: false,
-      error: { code: "NOT_READY", message: "Kênh này chạy trên renderer engine." },
+      error: { code: "NOT_READY", message: "Kenh nay chay tren renderer engine." },
     }));
   }
 }
@@ -153,14 +153,19 @@ if (!gotLock) {
 } else {
   app.setName("AI-Social");
   app.setPath("userData", ensureDataDir());
-  app.whenReady().then(() => {
-    ensureDataDir();
-    registerIpc();
-    createWindow();
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  app
+    .whenReady()
+    .then(() => {
+      ensureDataDir();
+      registerIpc();
+      createWindow();
+      app.on("activate", () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      });
+    })
+    .catch((e) => {
+      console.error(e);
     });
-  });
   app.on("window-all-closed", () => {
     app.quit();
   });
