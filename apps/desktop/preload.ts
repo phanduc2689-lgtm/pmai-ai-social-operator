@@ -5,6 +5,8 @@ const ALLOWLIST = [
   "chrome.status",
   "chrome.launch",
   "chrome.autoConnect",
+  "chrome.createProfile",
+  "chrome.cloneProfile",
   "chrome.observe",
   "chrome.goto",
   "chrome.type",

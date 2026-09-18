@@ -16,6 +16,8 @@ const ALLOWLIST = [
   "chrome.status",
   "chrome.launch",
   "chrome.autoConnect",
+  "chrome.createProfile",
+  "chrome.cloneProfile",
   "chrome.observe",
   "chrome.goto",
   "chrome.type",
@@ -79,10 +81,10 @@ function handleOnce(channel, fn) {
 }
 
 function pickDirectory(payload) {
-  if (payload && payload.directory) return payload.directory;
-  const list = chromeScan.listChromeProfiles();
+  if (payload && (payload.profileId || payload.directory)) return payload.profileId || payload.directory;
+  const list = chromeScan.listPmaiProfiles();
   const pick = chromeScan.pickLoggedInChromeProfile(list);
-  return (pick && pick.directory) || "Default";
+  return (pick && pick.id) || null;
 }
 
 function createWindow() {
@@ -117,8 +119,10 @@ function createWindow() {
 }
 
 function registerIpc() {
-  handleOnce("chrome.listProfiles", wrap(async () => chromeScan.listChromeProfiles()));
+  handleOnce("chrome.listProfiles", wrap(async () => adapter().listProfiles()));
   handleOnce("chrome.status", wrap(async () => adapter().status()));
+  handleOnce("chrome.createProfile", wrap(async (payload) => adapter().createProfile(payload || {})));
+  handleOnce("chrome.cloneProfile", wrap(async (payload) => adapter().cloneProfile(payload || {})));
   handleOnce(
     "chrome.launch",
     wrap(async (payload) => adapter().launchSelected(pickDirectory(payload), { reuse: Boolean(payload && payload.reuse) })),
@@ -128,6 +132,7 @@ function registerIpc() {
     wrap(async (payload) =>
       adapter().autoConnect({
         directory: pickDirectory(payload),
+        profileId: pickDirectory(payload),
         reuse: payload && payload.reuse !== undefined ? Boolean(payload.reuse) : true,
       }),
     ),
