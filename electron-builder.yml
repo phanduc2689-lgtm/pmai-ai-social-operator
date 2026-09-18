@@ -1,0 +1,33 @@
+appId: com.pmai.aisocialoperator
+productName: AI Social Operator
+copyright: PMAI
+artifactName: AI-Social-Operator-Setup-v${version}.${ext}
+directories:
+  app: apps/desktop/pack
+  output: release
+  buildResources: apps/desktop/build
+files:
+  - dist-main/**/*
+  - dist-renderer/**/*
+  - package.json
+asar: true
+forceCodeSigning: false
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: apps/desktop/build/icon.png
+  signAndEditExecutable: false
+  verifyUpdateCodeSignature: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: AI Social Operator
+  uninstallDisplayName: AI Social Operator
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+  packElevateHelper: false
+  artifactName: AI-Social-Operator-Setup-v${version}.${ext}
