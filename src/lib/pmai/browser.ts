@@ -80,7 +80,7 @@ export class FakeBrowserAdapter implements BrowserAdapter {
 
   async goto(url: string) {
     this.calls.push({ method: "goto", args: [url] });
-    this.url = url;
+    this.url = this.opts.mismatchPage ? "https://www.facebook.com/wrongpage" : url;
   }
 
   async type(target: SemanticTarget, text: string) {

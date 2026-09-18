@@ -47,8 +47,9 @@ function facebookHostPresent(cookiesFile: string): boolean {
 }
 
 function isLocked(profilePath: string, userDataDir: string): boolean {
-  const lockNames = ["SingletonLock", "lockfile", "DevToolsActivePort"];
-  return lockNames.some((n) => fs.existsSync(path.join(profilePath, n)) || fs.existsSync(path.join(userDataDir, n)));
+  return ["SingletonLock", "lockfile"].some(
+    (n) => fs.existsSync(path.join(profilePath, n)) || fs.existsSync(path.join(userDataDir, n)),
+  );
 }
 
 export function listChromeProfiles(userDataDir = defaultChromeUserDataDir()): ChromeProfileInfo[] {
