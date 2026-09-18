@@ -3,8 +3,7 @@
 /**
  * ChromiumAdapter — Electron main only.
  * Never launch against the system Chrome User Data directory (Chrome 136+ blocks CDP).
- * PMAI owns user-data-dir under %LOCALAPPDATA%\PMAI\profiles\<id>.
- * Session persists in that folder. Clone copies a PMAI profile only — not system Chrome cookies.
+ * Composer: New Pages Experience dialog only — never the feed comment box.
  */
 
 const fs = require("node:fs");
@@ -31,28 +30,45 @@ function err(code, message) {
   return e;
 }
 
+function postDialog(page) {
+  return page
+    .locator('div[role="dialog"]')
+    .filter({ hasText: /đăng|tạo bài|create post|bạn đang nghĩ gì|what.?s on your mind/i })
+    .last();
+}
+
 function composerOpeners(page) {
   return [
-    page.getByRole("button", { name: /what's on your mind|bạn đang nghĩ gì|create a post|tạo bài viết|write a post|bài viết/i }).first(),
-    page.getByText(/what's on your mind|bạn đang nghĩ gì/i).first(),
-    page.locator('[aria-label*="Create a post" i], [aria-label*="Tạo bài" i]').first(),
+    page.getByRole("button", { name: /tạo bài viết|create a post|viết bài/i }).first(),
+    page.getByText(/bạn đang nghĩ gì|what.?s on your mind/i).first(),
+    page.locator('[aria-label*="Tạo bài" i], [aria-label*="Create a post" i]').first(),
   ];
 }
 
 function composerBoxes(page) {
+  const dlg = postDialog(page);
   return [
-    page.locator('[contenteditable="true"][role="textbox"]').last(),
-    page.locator('div[role="dialog"] [contenteditable="true"]').last(),
-    page.locator('div[contenteditable="true"]').last(),
-    page.getByRole("textbox", { name: /bài viết|what's on your mind|viết/i }).first(),
+    dlg.getByRole("textbox", { name: /bạn đang nghĩ gì|what.?s on your mind|viết/i }).first(),
+    dlg.locator('[contenteditable="true"][role="textbox"]').first(),
+    dlg.locator('[contenteditable="true"]').first(),
+    page.getByRole("textbox", { name: /bạn đang nghĩ gì|what.?s on your mind/i }).first(),
   ];
 }
 
 function publishButtons(page) {
+  const dlg = postDialog(page);
   return [
-    page.getByRole("button", { name: /^(đăng|post)$/i }).last(),
-    page.locator('[aria-label="Post"], [aria-label="Đăng"]').last(),
-    page.getByRole("button", { name: /đăng|post/i }).last(),
+    dlg.getByRole("button", { name: /^(đăng|post)$/i }).last(),
+    dlg.getByRole("button", { name: /(đăng|post)/i }).last(),
+    dlg.locator('[aria-label="Post"], [aria-label="Đăng"]').last(),
+  ];
+}
+
+function nextButtons(page) {
+  const dlg = postDialog(page);
+  return [
+    dlg.getByRole("button", { name: /^(tiếp|next)$/i }).last(),
+    dlg.getByRole("button", { name: /tiếp|next/i }).last(),
   ];
 }
 
@@ -74,6 +90,14 @@ async function firstVisible(candidates) {
     }
   }
   return null;
+}
+
+async function safeClick(loc) {
+  try {
+    await loc.click({ timeout: 4000 });
+  } catch {
+    await loc.click({ timeout: 4000, force: true });
+  }
 }
 
 async function loadPlaywright() {
@@ -202,10 +226,7 @@ async function ensureBrowser(profileId) {
   store.touchProfile(profile.id, { cdpPort: usePort });
   const up = await waitCdp(usePort, 25000);
   if (!up) {
-    throw err(
-      "NOT_READY",
-      "Đã mở Chrome hồ sơ PMAI nhưng cổng CDP chưa sẵn sàng. Đóng cửa sổ đó rồi mở lại từ app.",
-    );
+    throw err("NOT_READY", "Đã mở Chrome hồ sơ PMAI nhưng cổng CDP chưa sẵn sàng. Đóng cửa sổ đó rồi mở lại từ app.");
   }
   return connectCdp(usePort, profile.id);
 }
@@ -230,13 +251,11 @@ async function status() {
 }
 
 async function createProfile(payload = {}) {
-  const created = store.createPmaiProfile(payload.displayName || payload.name || "Hồ sơ PMAI");
-  return created;
+  return store.createPmaiProfile(payload.displayName || payload.name || "Hồ sơ PMAI");
 }
 
 async function cloneProfile(payload = {}) {
-  const sourceId = payload.sourceId || payload.directory;
-  return store.clonePmaiProfile(sourceId, payload.displayName || payload.name);
+  return store.clonePmaiProfile(payload.sourceId || payload.directory, payload.displayName || payload.name);
 }
 
 async function observe() {
@@ -287,46 +306,76 @@ async function goto(url) {
   return observe();
 }
 
+async function ensureComposerOpen() {
+  const dlgVisible = await postDialog(live.page)
+    .isVisible()
+    .catch(() => false);
+  if (dlgVisible) return;
+  const opener = await firstVisible(composerOpeners(live.page));
+  if (!opener) throw err("UI_CHANGED", "Không thấy nút mở ô soạn bài (Tạo bài viết)." );
+  await safeClick(opener);
+  await new Promise((r) => setTimeout(r, 700));
+}
+
 async function typeText(name, text) {
+  await ensureComposerOpen();
   let box = await firstVisible(composerBoxes(live.page));
   if (!box) {
-    const opener = await firstVisible(composerOpeners(live.page).concat(genericLocators(live.page, name || "bài viết")));
-    if (opener) {
-      await opener.click();
-      await new Promise((r) => setTimeout(r, 600));
-    }
-    box = await firstVisible(composerBoxes(live.page));
+    throw err("UI_CHANGED", "Không thấy ô soạn trong hộp thoại Tạo bài viết." );
   }
-  if (!box) {
-    throw err("UI_CHANGED", "Không thấy ô soạn. UI Facebook có thể đã đổi.");
-  }
-  await box.click();
   try {
-    await box.fill(text);
+    await box.click({ timeout: 3000 });
   } catch {
+    await box.click({ timeout: 3000, force: true });
+  }
+  try {
+    await live.page.keyboard.press("Control+A");
     await live.page.keyboard.insertText(text);
+  } catch {
+    await box.fill(text);
   }
 }
 
 async function uploadFiles(files) {
-  const input = live.page.locator('input[type="file"]').first();
-  await input.setInputFiles(files);
+  await ensureComposerOpen();
+  const dlg = postDialog(live.page);
+  const add = await firstVisible([
+    dlg.getByRole("button", { name: /thêm ảnh|photo|video|tải ảnh/i }),
+    dlg.locator('[aria-label*="Thêm ảnh" i], [aria-label*="photo" i]'),
+  ]);
+  if (add) {
+    try {
+      await add.click({ timeout: 2000 });
+    } catch {
+      /* file input may already be in DOM */
+    }
+  }
+  const input = dlg.locator('input[type="file"]').first();
+  const fallback = live.page.locator('div[role="dialog"] input[type="file"]').last();
+  const target = (await input.count()) ? input : fallback;
+  await target.setInputFiles(files);
 }
 
 async function clickNamed(name) {
   const n = String(name || "");
-  let btn = null;
   if (/composer|bài viết|create a post/i.test(n)) {
-    btn = await firstVisible(composerOpeners(live.page).concat(genericLocators(live.page, n)));
-  } else if (/^(đăng|post|publish)$/i.test(n) || /đăng|publish/i.test(n)) {
-    btn = await firstVisible(publishButtons(live.page).concat(genericLocators(live.page, n)));
-  } else {
-    btn = await firstVisible(genericLocators(live.page, n));
+    await ensureComposerOpen();
+    return;
   }
-  if (!btn) {
-    throw err("UI_CHANGED", `Không thấy nút «${name}».`);
+  if (/^(đăng|post|publish)$/i.test(n) || /đăng|publish/i.test(n)) {
+    const nxt = await firstVisible(nextButtons(live.page));
+    if (nxt) {
+      await safeClick(nxt);
+      await new Promise((r) => setTimeout(r, 600));
+    }
+    const btn = await firstVisible(publishButtons(live.page));
+    if (!btn) throw err("UI_CHANGED", "Không thấy nút Đăng trong hộp thoại." );
+    await safeClick(btn);
+    return;
   }
-  await btn.click();
+  const btn = await firstVisible(genericLocators(live.page, n));
+  if (!btn) throw err("UI_CHANGED", `Không thấy nút «${name}».`);
+  await safeClick(btn);
 }
 
 async function screenshotPng() {
@@ -344,11 +393,8 @@ async function screenshotPng() {
 
 async function closeBrowser() {
   try {
-    if (live.mode === "cdp") {
-      live.browser = null;
-    } else {
-      await live.context?.close();
-    }
+    if (live.mode === "cdp") live.browser = null;
+    else await live.context?.close();
   } finally {
     live = { browser: null, context: null, page: null, mode: null, profileId: null, cdpPort: DEFAULT_CDP_PORT };
   }
