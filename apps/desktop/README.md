@@ -1,15 +1,13 @@
 # PMAI desktop (Electron)
 
-Runtime entry: `apps/desktop/dist-main/main.cjs` (package.json `"main"`).
+Runtime: `apps/desktop/dist-main/main.cjs` (`package.json` `"main"`).
 
 Trên Windows:
 
 ```
-npm install
-npx playwright install chrome
+git clone https://github.com/phanduc2689-lgtm/pmai-ai-social-operator.git
+cd pmai-ai-social-operator
 CAI-DAT-WINDOWS.bat
 ```
 
-Main process quét Chrome User Data, tự chọn hồ sơ `facebookLikely`, gắn CDP `9222` hoặc spawn Chrome với `--remote-debugging-port=9222`. Không copy cookie.
-
-Renderer không import `playwright`. Domain engine không import adapter Node.
+Main process quét Chrome User Data, tự chọn hồ sơ `facebookLikely`, gắn CDP `9222` hoặc spawn Chrome với `--remote-debugging-port=9222`. Không copy cookie. Renderer không import Playwright.

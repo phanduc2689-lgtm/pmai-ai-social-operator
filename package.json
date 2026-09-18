@@ -5,8 +5,12 @@
   "sideEffects": false,
   "type": "module",
   "main": "apps/desktop/dist-main/main.cjs",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite --config apps/desktop/vite.config.ts --host 127.0.0.1 --port 5174",
+    "start": "node apps/desktop/run-dev.mjs",
     "test": "node --experimental-strip-types --test src/lib/pmai/engine.test.ts src/lib/pmai/chrome-profiles.test.ts",
     "typecheck": "tsc --noEmit",
     "electron:dev": "node apps/desktop/run-dev.mjs"
