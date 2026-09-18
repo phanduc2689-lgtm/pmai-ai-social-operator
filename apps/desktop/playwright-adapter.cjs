@@ -218,6 +218,22 @@ async function ensureBrowser(directory) {
   }
 }
 
+async function autoConnect(opts = {}) {
+  const profiles = listChromeProfiles();
+  const picked = pickLoggedInChromeProfile(profiles) || profiles[0] || null;
+  const dir = opts.directory || (picked && picked.directory) || "Default";
+  if (!profiles.length) {
+    throw err("NOT_READY", "Không thấy Google Chrome User Data trên máy này. Cài Chrome rồi thử lại.");
+  }
+  const observation = await launchSelected(dir, { reuse: Boolean(opts.reuse) });
+  return {
+    profile: profiles.find((p) => p.directory === dir) || picked,
+    observation,
+    cdpAvailable: await isCdpUp(),
+    liveMode: live.mode,
+  };
+}
+
 async function listProfiles() {
   return listChromeProfiles();
 }
@@ -344,6 +360,7 @@ module.exports = {
   listProfiles,
   status,
   launchSelected,
+  autoConnect,
   observe,
   goto,
   typeText,
