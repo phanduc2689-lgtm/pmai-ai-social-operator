@@ -153,19 +153,16 @@ if (!gotLock) {
 } else {
   app.setName("AI-Social");
   app.setPath("userData", ensureDataDir());
-  app
-    .whenReady()
-    .then(() => {
-      ensureDataDir();
-      registerIpc();
-      createWindow();
-      app.on("activate", () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
-      });
-    })
-    .catch((e) => {
-      console.error(e);
+  app.whenReady().then(() => {
+    ensureDataDir();
+    registerIpc();
+    createWindow();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+  }).catch((e) => {
+    console.error(e);
+  });
   app.on("window-all-closed", () => {
     app.quit();
   });
