@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #f1eee6;
+  --color-surface: #fbfaf6;
+  --color-fg: #1c1b19;
+  --color-muted: #5e5a53;
+  --color-subtle: #8a8478;
+  --color-accent: #2f4a5c;
+  --color-accent-fg: #fbfaf6;
+  --color-border: color-mix(in oklab, #1c1b19 12%, transparent);
+  --color-border-strong: color-mix(in oklab, #1c1b19 22%, transparent);
+  --color-ok: #1f5c45;
+  --color-ok-bg: #e6f0ea;
+  --color-warn: #8a4b12;
+  --color-warn-bg: #f6eedf;
+  --color-danger: #8b2e24;
+  --color-danger-bg: #f6e6e2;
+  --color-info: #2f4a5c;
+  --color-info-bg: #e7eef2;
+  --color-agent: #3f3f46;
+  --color-agent-bg: #eceaf0;
+  --color-code: #14181d;
+  --color-code-fg: #e8e4d9;
+  --color-gold-doc: #8a6a2a;
+
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-serif: "Newsreader", "Liberation Serif", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 28px;
+
+  --shadow-panel: 0 1px 0 color-mix(in oklab, #1c1b19 8%, transparent),
+    0 12px 32px -18px color-mix(in oklab, #1c1b19 28%, transparent);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.article-body p {
+  text-wrap: pretty;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
