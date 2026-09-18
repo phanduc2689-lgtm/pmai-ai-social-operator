@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { isPmaiError } from "./errors.ts";
 import { HostBrowserAdapter } from "./host-browser.ts";
 import { getEngine } from "./host.ts";
-import { hasElectronHost } from "./ipc.ts";
+import { hasElectronHost, hostInvoke } from "./ipc.ts";
 import type { MediaAsset } from "./types.ts";
 
 export function usePmai() {
@@ -61,8 +61,20 @@ export function usePmai() {
     removePage: (id: string) => run(() => engine.removePage(id)),
     createDraft: (brief: string) => run(() => engine.createDraft(brief)),
     updateDraft: (id: string, body: string, media?: MediaAsset[]) => run(() => engine.updateDraft(id, body, media ?? [])),
-    addImage: (id: string, file: { name: string; size: number; mimeType: string }) =>
+    addImage: (id: string, file: { name: string; size: number; mimeType: string; localPath?: string }) =>
       run(() => engine.addLocalImage(id, file)),
+    pickImages: async (contentId: string) => {
+      const picked = await hostInvoke<{ localPath: string; name: string; size: number; mimeType: string }[]>("chrome.pickImages");
+      if (!picked.ok || !picked.data?.length) {
+        if (picked.error) setToast(picked.error.message);
+        return;
+      }
+      for (const f of picked.data) {
+        await run(() => engine.addLocalImage(contentId, f));
+      }
+    },
+    toggleMedia: (contentId: string, mediaId: string, attach: boolean) => run(() => engine.toggleMediaAttach(contentId, mediaId, attach)),
+    removeMedia: (contentId: string, mediaId: string) => run(() => engine.removeMedia(contentId, mediaId)),
     submit: (id: string) => run(() => engine.submitForApproval(id)),
     decide: (id: string, d: "APPROVE" | "REJECT" | "CANCEL") => run(() => engine.decideApproval(id, d)),
     execute: (taskId: string) =>

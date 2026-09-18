@@ -75,6 +75,8 @@ export interface MediaAsset {
   checksum: string;
   mimeType: string;
   size: number;
+  localPath?: string;
+  attach?: boolean;
 }
 
 export interface ContentItem {
