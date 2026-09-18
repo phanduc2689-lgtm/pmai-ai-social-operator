@@ -9,6 +9,7 @@ const ALLOWLIST = [
   "chrome.autoConnect",
   "chrome.createProfile",
   "chrome.cloneProfile",
+  "chrome.pickImages",
   "chrome.observe",
   "chrome.goto",
   "chrome.type",
