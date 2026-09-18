@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -18,6 +18,7 @@ const ALLOWLIST = [
   "chrome.autoConnect",
   "chrome.createProfile",
   "chrome.cloneProfile",
+  "chrome.pickImages",
   "chrome.observe",
   "chrome.goto",
   "chrome.type",
@@ -87,6 +88,14 @@ function pickDirectory(payload) {
   return (pick && pick.id) || null;
 }
 
+function guessMime(fp) {
+  const ext = path.extname(fp).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  return "image/jpeg";
+}
+
 function createWindow() {
   const preload = path.join(__dirname, "preload.cjs");
   const indexHtml = path.join(__dirname, "..", "dist-renderer", "index.html");
@@ -124,6 +133,24 @@ function registerIpc() {
   handleOnce("chrome.createProfile", wrap(async (payload) => adapter().createProfile(payload || {})));
   handleOnce("chrome.cloneProfile", wrap(async (payload) => adapter().cloneProfile(payload || {})));
   handleOnce(
+    "chrome.pickImages",
+    wrap(async () => {
+      const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+      const r = await dialog.showOpenDialog(win, {
+        title: "Chọn ảnh đăng kèm",
+        properties: ["openFile", "multiSelections"],
+        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+      });
+      if (r.canceled) return [];
+      return r.filePaths.map((fp) => ({
+        localPath: fp,
+        name: path.basename(fp),
+        size: fs.statSync(fp).size,
+        mimeType: guessMime(fp),
+      }));
+    }),
+  );
+  handleOnce(
     "chrome.launch",
     wrap(async (payload) => adapter().launchSelected(pickDirectory(payload), { reuse: Boolean(payload && payload.reuse) })),
   );
@@ -158,16 +185,19 @@ if (!gotLock) {
 } else {
   app.setName("AI-Social");
   app.setPath("userData", ensureDataDir());
-  app.whenReady().then(() => {
-    ensureDataDir();
-    registerIpc();
-    createWindow();
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  app
+    .whenReady()
+    .then(() => {
+      ensureDataDir();
+      registerIpc();
+      createWindow();
+      app.on("activate", () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      });
+    })
+    .catch((e) => {
+      console.error(e);
     });
-  }).catch((e) => {
-    console.error(e);
-  });
   app.on("window-all-closed", () => {
     app.quit();
   });
