@@ -58,6 +58,7 @@ export function usePmai() {
     markLoggedIn: (name: string, opts?: { seedDemo?: boolean }) => run(() => engine.markLoggedIn(name, opts)),
     selectPage: (id: string) => run(() => engine.selectPage(id)),
     addPage: (name: string, url: string) => run(() => engine.addPage({ name, url })),
+    removePage: (id: string) => run(() => engine.removePage(id)),
     createDraft: (brief: string) => run(() => engine.createDraft(brief)),
     updateDraft: (id: string, body: string, media?: MediaAsset[]) => run(() => engine.updateDraft(id, body, media ?? [])),
     addImage: (id: string, file: { name: string; size: number; mimeType: string }) =>
