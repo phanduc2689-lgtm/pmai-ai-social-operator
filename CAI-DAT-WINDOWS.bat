@@ -3,11 +3,9 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title PMAI - Cai dat Windows
 
-where git >nul 2>&1
 where node >nul 2>&1
 if errorlevel 1 (
-  echo Can Node.js 22: https://nodejs.org
-  echo Can Git: https://git-scm.com
+  echo Can Node.js 22+: https://nodejs.org
   pause
   exit /b 1
 )
@@ -18,8 +16,9 @@ echo Thu muc: %cd%
 echo.
 
 if not exist package.json (
-  echo Thieu package.json. Hay clone dung repo:
-  echo git clone https://github.com/phanduc2689-lgtm/pmai-ai-social-operator.git
+  echo Thieu package.json.
+  echo Neu ban tai ZIP: vao dung thu muc co file CAI-DAT-WINDOWS.bat va package.json.
+  echo Hoac: git clone https://github.com/phanduc2689-lgtm/pmai-ai-social-operator.git
   pause
   exit /b 1
 )

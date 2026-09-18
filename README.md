@@ -11,9 +11,9 @@ Repo: https://github.com/phanduc2689-lgtm/pmai-ai-social-operator
 
 ## Cài trên Windows (cách đang dùng)
 
-Cần: [Node.js 22](https://nodejs.org/), [Google Chrome](https://www.google.com/chrome/), [Git](https://git-scm.com/).
+Cần: [Node.js 22+](https://nodejs.org/), [Google Chrome](https://www.google.com/chrome/). Git không bắt buộc nếu bạn tải ZIP.
 
-Mở **Command Prompt** hoặc PowerShell:
+Mở **Command Prompt**:
 
 ```bat
 git clone https://github.com/phanduc2689-lgtm/pmai-ai-social-operator.git
@@ -21,7 +21,20 @@ cd pmai-ai-social-operator
 CAI-DAT-WINDOWS.bat
 ```
 
+Hoặc tải ZIP từ GitHub → giải nén → vào **thư mục có file** `CAI-DAT-WINDOWS.bat` + `package.json` → chạy file đó.
+
 File `CAI-DAT-WINDOWS.bat` sẽ: `npm install` → cài Chrome cho Playwright → mở app Electron.
+
+### Nếu đã cài bản cũ (lỗi spawn EINVAL)
+
+Đó là lỗi Node 24 trên Windows khi gọi `npx.cmd`. Bản mới đã sửa. Lấy lại source rồi chạy:
+
+```bat
+cd pmai-ai-social-operator
+CAI-DAT-WINDOWS.bat
+```
+
+Nếu tải ZIP: tải lại file ZIP mới nhất, giải nén đè lên thư mục cũ, chạy lại `CAI-DAT-WINDOWS.bat`.
 
 ### Kết nối Chrome đã login
 
