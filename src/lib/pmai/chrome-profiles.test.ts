@@ -31,4 +31,32 @@ describe("chrome profiles", () => {
     const list = listChromeProfiles(dir);
     assert.equal(JSON.stringify(list).includes("SECRETVALUE"), false);
   });
+
+  it("does not treat leftover DevToolsActivePort as a lock", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pmai-chrome-"));
+    fs.mkdirSync(path.join(dir, "Default", "Network"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "Default", "DevToolsActivePort"), "9222");
+    fs.writeFileSync(path.join(dir, "Default", "Network", "Cookies"), Buffer.from(".facebook.com"));
+    const list = listChromeProfiles(dir);
+    assert.equal(list[0].locked, false);
+    assert.equal(pickLoggedInChromeProfile(list)?.directory, "Default");
+  });
+
+  it("treats SingletonLock as locked and still prefers facebook-likely", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pmai-chrome-"));
+    fs.mkdirSync(path.join(dir, "Default"));
+    fs.mkdirSync(path.join(dir, "Profile 1", "Network"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "Local State"),
+      JSON.stringify({
+        profile: { info_cache: { Default: { name: "Work" }, "Profile 1": { name: "PM Travel" } } },
+      }),
+    );
+    fs.writeFileSync(path.join(dir, "SingletonLock"), "");
+    fs.writeFileSync(path.join(dir, "Profile 1", "Network", "Cookies"), Buffer.from(".facebook.com"));
+    const list = listChromeProfiles(dir);
+    const fb = list.find((p) => p.directory === "Profile 1");
+    assert.equal(fb?.locked, true);
+    assert.equal(pickLoggedInChromeProfile(list)?.directory, "Profile 1");
+  });
 });
