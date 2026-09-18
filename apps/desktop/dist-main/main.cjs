@@ -38,6 +38,8 @@ const ALLOWLIST = [
   "activity.list",
 ];
 
+const registered = new Set();
+
 function dataRoot() {
   return path.join(app.getPath("appData"), "AI-Social");
 }
@@ -63,6 +65,17 @@ function wrap(fn) {
       };
     }
   };
+}
+
+function handleOnce(channel, fn) {
+  if (registered.has(channel)) return;
+  registered.add(channel);
+  try {
+    ipcMain.removeHandler(channel);
+  } catch {
+    /* not registered */
+  }
+  ipcMain.handle(channel, fn);
 }
 
 function pickDirectory(payload) {
@@ -104,13 +117,13 @@ function createWindow() {
 }
 
 function registerIpc() {
-  ipcMain.handle("chrome.listProfiles", wrap(async () => chromeScan.listChromeProfiles()));
-  ipcMain.handle("chrome.status", wrap(async () => adapter().status()));
-  ipcMain.handle(
+  handleOnce("chrome.listProfiles", wrap(async () => chromeScan.listChromeProfiles()));
+  handleOnce("chrome.status", wrap(async () => adapter().status()));
+  handleOnce(
     "chrome.launch",
     wrap(async (payload) => adapter().launchSelected(pickDirectory(payload), { reuse: Boolean(payload && payload.reuse) })),
   );
-  ipcMain.handle(
+  handleOnce(
     "chrome.autoConnect",
     wrap(async (payload) =>
       adapter().autoConnect({
@@ -119,16 +132,15 @@ function registerIpc() {
       }),
     ),
   );
-  ipcMain.handle("chrome.observe", wrap(async () => adapter().observe()));
-  ipcMain.handle("chrome.goto", wrap(async (payload) => adapter().goto(payload.url)));
-  ipcMain.handle("chrome.type", wrap(async (payload) => adapter().typeText(payload.name, payload.text)));
-  ipcMain.handle("chrome.upload", wrap(async (payload) => adapter().uploadFiles(payload.files)));
-  ipcMain.handle("chrome.click", wrap(async (payload) => adapter().clickNamed(payload.name)));
-  ipcMain.handle("chrome.screenshot", wrap(async () => adapter().screenshotPng()));
-  ipcMain.handle("chrome.close", wrap(async () => adapter().closeBrowser()));
+  handleOnce("chrome.observe", wrap(async () => adapter().observe()));
+  handleOnce("chrome.goto", wrap(async (payload) => adapter().goto(payload.url)));
+  handleOnce("chrome.type", wrap(async (payload) => adapter().typeText(payload.name, payload.text)));
+  handleOnce("chrome.upload", wrap(async (payload) => adapter().uploadFiles(payload.files)));
+  handleOnce("chrome.click", wrap(async (payload) => adapter().clickNamed(payload.name)));
+  handleOnce("chrome.screenshot", wrap(async () => adapter().screenshotPng()));
+  handleOnce("chrome.close", wrap(async () => adapter().closeBrowser()));
   for (const ch of ALLOWLIST) {
-    if (ipcMain.listenerCount(ch) > 0) continue;
-    ipcMain.handle(ch, async () => ({
+    handleOnce(ch, async () => ({
       ok: false,
       error: { code: "NOT_READY", message: "Kênh này chạy trên renderer engine." },
     }));
