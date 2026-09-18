@@ -15,6 +15,7 @@ const ALLOWLIST = [
   "chrome.listProfiles",
   "chrome.status",
   "chrome.launch",
+  "chrome.autoConnect",
   "chrome.observe",
   "chrome.goto",
   "chrome.type",
@@ -108,6 +109,15 @@ function registerIpc() {
   ipcMain.handle(
     "chrome.launch",
     wrap(async (payload) => adapter().launchSelected(pickDirectory(payload), { reuse: Boolean(payload && payload.reuse) })),
+  );
+  ipcMain.handle(
+    "chrome.autoConnect",
+    wrap(async (payload) =>
+      adapter().autoConnect({
+        directory: pickDirectory(payload),
+        reuse: payload && payload.reuse !== undefined ? Boolean(payload.reuse) : true,
+      }),
+    ),
   );
   ipcMain.handle("chrome.observe", wrap(async () => adapter().observe()));
   ipcMain.handle("chrome.goto", wrap(async (payload) => adapter().goto(payload.url)));

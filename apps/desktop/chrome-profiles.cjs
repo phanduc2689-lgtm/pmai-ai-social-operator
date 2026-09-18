@@ -39,7 +39,7 @@ function facebookHostPresent(cookiesFile) {
 }
 
 function isLocked(profilePath, userDataDir) {
-  return ["SingletonLock", "lockfile", "DevToolsActivePort"].some(
+  return ["SingletonLock", "lockfile"].some(
     (n) => fs.existsSync(path.join(profilePath, n)) || fs.existsSync(path.join(userDataDir, n)),
   );
 }
