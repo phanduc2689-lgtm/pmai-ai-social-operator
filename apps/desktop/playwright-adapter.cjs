@@ -1,16 +1,10 @@
 "use strict";
 
 /**
- * ChromiumAdapter — Electron main only. Domain must not import this file.
- * Does not copy cookies between profiles. Does not log cookie/token values.
- *
- * Attach order:
- * 1. Reuse live Playwright session if still alive
- * 2. CDP http://127.0.0.1:9222 (Chrome already opened with remote debug)
- * 3. If User Data is locked (Chrome running without CDP) → fail closed
- * 4. Spawn the installed Google Chrome with --remote-debugging-port=9222
- *    and the selected --profile-directory, then connectOverCDP
- * 5. launchPersistentContext fallback
+ * ChromiumAdapter — Electron main only.
+ * Never launch against the system Chrome User Data directory (Chrome 136+ blocks CDP).
+ * PMAI owns user-data-dir under %LOCALAPPDATA%\PMAI\profiles\<id>.
+ * Session persists in that folder. Clone copies a PMAI profile only — not system Chrome cookies.
  */
 
 const fs = require("node:fs");
@@ -18,20 +12,17 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const {
-  defaultChromeExecutable,
-  defaultChromeUserDataDir,
-  listChromeProfiles,
-  pickLoggedInChromeProfile,
-} = require("./chrome-profiles.cjs");
+const store = require("./chrome-profiles.cjs");
 
-const CDP_URL = "http://127.0.0.1:9222";
+const DEFAULT_CDP_PORT = 9222;
 
 let live = {
   browser: null,
   context: null,
   page: null,
   mode: null,
+  profileId: null,
+  cdpPort: DEFAULT_CDP_PORT,
 };
 
 function err(code, message) {
@@ -93,9 +84,13 @@ async function loadPlaywright() {
   }
 }
 
-function isCdpUp() {
+function cdpUrl(port) {
+  return `http://127.0.0.1:${port}`;
+}
+
+function isCdpUp(port = live.cdpPort || DEFAULT_CDP_PORT) {
   return new Promise((resolve) => {
-    const req = http.get(`${CDP_URL}/json/version`, { timeout: 800 }, (res) => {
+    const req = http.get(`${cdpUrl(port)}/json/version`, { timeout: 800 }, (res) => {
       res.resume();
       resolve(res.statusCode >= 200 && res.statusCode < 500);
     });
@@ -107,13 +102,20 @@ function isCdpUp() {
   });
 }
 
-async function waitCdp(ms = 25000) {
+async function waitCdp(port, ms = 25000) {
   const start = Date.now();
   while (Date.now() - start < ms) {
-    if (await isCdpUp()) return true;
+    if (await isCdpUp(port)) return true;
     await new Promise((r) => setTimeout(r, 400));
   }
   return false;
+}
+
+async function findFreePort(start = DEFAULT_CDP_PORT) {
+  for (let p = start; p < start + 20; p++) {
+    if (!(await isCdpUp(p))) return p;
+  }
+  return start;
 }
 
 async function pageAlive() {
@@ -122,36 +124,47 @@ async function pageAlive() {
     await live.page.evaluate(() => document.readyState);
     return true;
   } catch {
-    live = { browser: null, context: null, page: null, mode: null };
+    live = { browser: null, context: null, page: null, mode: null, profileId: null, cdpPort: DEFAULT_CDP_PORT };
     return false;
   }
 }
 
-async function connectCdp() {
+async function connectCdp(port, profileId) {
   const { chromium } = await loadPlaywright();
-  const browser = await chromium.connectOverCDP(CDP_URL);
+  const browser = await chromium.connectOverCDP(cdpUrl(port));
   const context = browser.contexts()[0];
   if (!context) {
-    throw err("NOT_READY", "Chrome CDP không có context hồ sơ. Mở một tab trong Chrome rồi kết nối lại.");
+    throw err("NOT_READY", "Chrome CDP không có context. Mở một tab trong cửa sổ Chrome PMAI rồi kết nối lại.");
   }
   const pages = context.pages();
   const page = pages.find((p) => /facebook\.com/i.test(p.url())) || pages[0] || (await context.newPage());
-  live = { browser, context, page, mode: "cdp" };
-  return { mode: "cdp" };
+  live = { browser, context, page, mode: "cdp", profileId, cdpPort: port };
+  return { mode: "cdp", profileId, cdpPort: port };
 }
 
-function spawnChromeDebug(directory) {
-  const executablePath = defaultChromeExecutable();
+function assertNotSystemUserData(userDataDir) {
+  const system = store.defaultChromeUserDataDir();
+  const norm = (s) => path.resolve(s).toLowerCase();
+  if (norm(userDataDir) === norm(system) || norm(userDataDir).startsWith(norm(system) + path.sep)) {
+    throw err(
+      "IDLE_BLOCKED",
+      "Chrome 136+ cấm debug User Data mặc định. PMAI chỉ mở hồ sơ riêng trong %LOCALAPPDATA%\\PMAI\\profiles.",
+    );
+  }
+}
+
+function spawnChromeForProfile(profile, port) {
+  const executablePath = store.defaultChromeExecutable();
   if (!executablePath) {
     throw err("CAPABILITY_MISSING", "Không thấy Google Chrome. Cài Chrome rồi thử lại.");
   }
-  const userDataDir = defaultChromeUserDataDir();
+  assertNotSystemUserData(profile.userDataDir);
+  fs.mkdirSync(profile.userDataDir, { recursive: true });
   const child = spawn(
     executablePath,
     [
-      `--remote-debugging-port=9222`,
-      `--user-data-dir=${userDataDir}`,
-      `--profile-directory=${directory || "Default"}`,
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profile.userDataDir}`,
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-blink-features=AutomationControlled",
@@ -162,103 +175,68 @@ function spawnChromeDebug(directory) {
   child.unref();
 }
 
-async function launchPersistent(directory) {
-  const { chromium } = await loadPlaywright();
-  const userDataDir = defaultChromeUserDataDir();
-  const executablePath = defaultChromeExecutable();
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless: false,
-    viewport: null,
-    executablePath: executablePath || undefined,
-    channel: executablePath ? undefined : "chrome",
-    args: [`--profile-directory=${directory}`, "--disable-blink-features=AutomationControlled"],
-    ignoreDefaultArgs: ["--enable-automation"],
-  });
-  const page = context.pages()[0] || (await context.newPage());
-  live = { browser: null, context, page, mode: "persistent" };
-  return { mode: "persistent" };
-}
-
-function lockMessage(directory) {
-  const exe = defaultChromeExecutable() || "chrome.exe";
-  return [
-    "Chrome đang mở và khóa hồ sơ — PMAI không copy cookie sang chỗ khác.",
-    "Cách 1: đóng HẾT cửa sổ Google Chrome rồi bấm Kết nối lại.",
-    `Cách 2: đóng Chrome, mở lại bằng lệnh rồi kết nối:`,
-    `"${exe}" --remote-debugging-port=9222 --profile-directory=${directory || "Default"}`,
-  ].join(" ");
-}
-
-async function ensureBrowser(directory) {
-  if (await pageAlive()) return { mode: live.mode, reused: true };
-  if (await isCdpUp()) {
-    return connectCdp();
+async function ensureBrowser(profileId) {
+  let profile = profileId ? store.getProfile(profileId) : store.pickLoggedInChromeProfile();
+  if (!profile) {
+    profile = store.createPmaiProfile("Hồ sơ 1");
   }
-  const profiles = listChromeProfiles();
-  const locked = profiles.some((p) => p.locked);
-  if (locked) {
-    throw err("IDLE_BLOCKED", lockMessage(directory));
+  if (await pageAlive()) {
+    if (!live.profileId || live.profileId === profile.id) return { mode: live.mode, reused: true, profileId: profile.id };
   }
-  try {
-    spawnChromeDebug(directory);
-    const up = await waitCdp(25000);
-    if (!up) throw err("NOT_READY", "Chrome đã mở nhưng cổng 9222 chưa sẵn sàng. Thử đóng Chrome rồi kết nối lại.");
-    return connectCdp();
-  } catch (e) {
-    if (e && e.code === "IDLE_BLOCKED") throw e;
+  const port = profile.cdpPort || DEFAULT_CDP_PORT;
+  if (await isCdpUp(port) && !profile.locked) {
     try {
-      return await launchPersistent(directory);
-    } catch (err2) {
-      const msg = err2 instanceof Error ? err2.message : String(err2);
-      if (/in use|SingletonLock|ProcessSingleton/i.test(msg)) {
-        throw err("IDLE_BLOCKED", lockMessage(directory));
-      }
-      throw err2;
+      return await connectCdp(port, profile.id);
+    } catch {
+      /* spawn fresh */
     }
   }
-}
-
-async function autoConnect(opts = {}) {
-  const profiles = listChromeProfiles();
-  const picked = pickLoggedInChromeProfile(profiles) || profiles[0] || null;
-  const dir = opts.directory || (picked && picked.directory) || "Default";
-  if (!profiles.length) {
-    throw err("NOT_READY", "Không thấy Google Chrome User Data trên máy này. Cài Chrome rồi thử lại.");
+  if (profile.locked && !(await isCdpUp(port))) {
+    throw err(
+      "IDLE_BLOCKED",
+      `Đang mở cửa sổ Chrome của hồ sơ «${profile.displayName}» nhưng không có CDP. Đóng đúng cửa sổ đó rồi bấm Mở lại.`,
+    );
   }
-  const observation = await launchSelected(dir, { reuse: Boolean(opts.reuse) });
-  return {
-    profile: profiles.find((p) => p.directory === dir) || picked,
-    observation,
-    cdpAvailable: await isCdpUp(),
-    liveMode: live.mode,
-  };
+  const usePort = (await isCdpUp(port)) ? await findFreePort(port + 1) : port;
+  spawnChromeForProfile(profile, usePort);
+  store.touchProfile(profile.id, { cdpPort: usePort });
+  const up = await waitCdp(usePort, 25000);
+  if (!up) {
+    throw err(
+      "NOT_READY",
+      "Đã mở Chrome hồ sơ PMAI nhưng cổng CDP chưa sẵn sàng. Đóng cửa sổ đó rồi mở lại từ app.",
+    );
+  }
+  return connectCdp(usePort, profile.id);
 }
 
 async function listProfiles() {
-  return listChromeProfiles();
+  return store.listPmaiProfiles();
 }
 
 async function status() {
-  const profiles = listChromeProfiles();
+  const profiles = store.listPmaiProfiles();
   return {
-    cdpAvailable: await isCdpUp(),
+    cdpAvailable: await isCdpUp(live.cdpPort || DEFAULT_CDP_PORT),
     live: Boolean(live.page),
     liveMode: live.mode,
-    executable: defaultChromeExecutable(),
-    userDataDir: defaultChromeUserDataDir(),
-    picked: pickLoggedInChromeProfile(profiles),
+    executable: store.defaultChromeExecutable(),
+    userDataDir: store.profilesRoot(),
+    picked: store.pickLoggedInChromeProfile(profiles),
     profiles,
     locked: profiles.some((p) => p.locked),
+    systemUserDataBlocked: true,
   };
 }
 
-async function launchSelected(directory, opts = {}) {
-  const dir = directory || (pickLoggedInChromeProfile(listChromeProfiles()) || {}).directory || "Default";
-  const launched = await ensureBrowser(dir);
-  if (!opts.reuse || !launched.reused) {
-    await live.page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 45000 });
-  }
-  return observe();
+async function createProfile(payload = {}) {
+  const created = store.createPmaiProfile(payload.displayName || payload.name || "Hồ sơ PMAI");
+  return created;
+}
+
+async function cloneProfile(payload = {}) {
+  const sourceId = payload.sourceId || payload.directory;
+  return store.clonePmaiProfile(sourceId, payload.displayName || payload.name);
 }
 
 async function observe() {
@@ -281,7 +259,27 @@ async function observe() {
   } catch {
     /* keep title */
   }
-  return { url, title, pageState, pageName };
+  if (live.profileId) store.touchProfile(live.profileId, {});
+  return { url, title, pageState, pageName, profileId: live.profileId };
+}
+
+async function launchSelected(directory, opts = {}) {
+  const launched = await ensureBrowser(directory);
+  if (!opts.reuse || !launched.reused) {
+    await live.page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 45000 });
+  }
+  return observe();
+}
+
+async function autoConnect(opts = {}) {
+  const id = opts.directory || opts.profileId;
+  const observation = await launchSelected(id, { reuse: Boolean(opts.reuse) });
+  return {
+    profile: store.getProfile(live.profileId) || store.pickLoggedInChromeProfile(),
+    observation,
+    cdpAvailable: await isCdpUp(live.cdpPort),
+    liveMode: live.mode,
+  };
 }
 
 async function goto(url) {
@@ -352,7 +350,7 @@ async function closeBrowser() {
       await live.context?.close();
     }
   } finally {
-    live = { browser: null, context: null, page: null, mode: null };
+    live = { browser: null, context: null, page: null, mode: null, profileId: null, cdpPort: DEFAULT_CDP_PORT };
   }
 }
 
@@ -361,6 +359,8 @@ module.exports = {
   status,
   launchSelected,
   autoConnect,
+  createProfile,
+  cloneProfile,
   observe,
   goto,
   typeText,
