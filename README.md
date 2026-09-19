@@ -1,5 +1,7 @@
 # PMAI — AI Social Operator
 
+**v1.0.0** — luồng đăng ảnh + bài viết lên Facebook Page đã xong (soạn → duyệt → đăng).
+
 Desktop app: soạn bài Facebook bằng AI, **bạn duyệt**, rồi **Chrome trên máy bạn** mới đăng.
 
 - Không lấy mật khẩu Facebook
@@ -8,6 +10,8 @@ Desktop app: soạn bài Facebook bằng AI, **bạn duyệt**, rồi **Chrome t
 - Composer Facebook không mở trước khi bạn bấm Duyệt
 
 Repo: https://github.com/phanduc2689-lgtm/pmai-ai-social-operator
+
+**Tải bản 1.0 đã chốt:** [Releases · v1.0.0](https://github.com/phanduc2689-lgtm/pmai-ai-social-operator/releases/tag/v1.0.0)
 
 ## Cài trên Windows (cách đang dùng)
 

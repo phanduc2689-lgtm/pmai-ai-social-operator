@@ -110,7 +110,7 @@ const electronCli = path.join(root, "node_modules", "electron", "cli.js");
 mustExist(electronCli, "Chay: npm install");
 const mainCjs = mustExist(path.join(root, "apps", "desktop", "dist-main", "main.cjs"));
 
-console.log("PMAI Electron — thu muc:", root);
+console.log("PMAI v1.0.0 — thu muc:", root);
 console.log("PMAI boot gpu-swiftshader");
 if (!fs.readFileSync(mainCjs, "utf8").includes("disableHardwareAcceleration")) {
   console.error("BAN MAIN.CJS CU — cua so se khong hien. Tai lai repo tu GitHub (khong dung ZIP cu).");

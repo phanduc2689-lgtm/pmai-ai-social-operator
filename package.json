@@ -1,7 +1,7 @@
 {
   "name": "pmai-ai-social-operator",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "sideEffects": false,
   "type": "module",
   "main": "apps/desktop/dist-main/main.cjs",

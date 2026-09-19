@@ -16,7 +16,7 @@ app.commandLine.appendSwitch("disable-direct-composition");
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion,HardwareMediaKeyHandling");
 app.commandLine.appendSwitch("use-angle", "swiftshader");
 app.commandLine.appendSwitch("use-gl", "angle");
-console.log("PMAI boot gpu-swiftshader");
+console.log("PMAI v1.0.0 boot gpu-swiftshader");
 
 const chromeScan = require("./chrome-profiles.cjs");
 let playwrightAdapter = null;

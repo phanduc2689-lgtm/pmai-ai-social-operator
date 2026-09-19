@@ -156,7 +156,7 @@ function PmaiShell() {
             );
           })}
         </nav>
-        <p style={{ padding: "12px 16px", fontSize: 11, color: "var(--color-subtle)" }}>MVP1 · một operator · local</p>
+        <p style={{ padding: "12px 16px", fontSize: 11, color: "var(--color-subtle)" }}>v1.0 · một operator · local</p>
       </aside>
 
       <div className="pmai-col">
