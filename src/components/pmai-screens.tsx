@@ -1,4 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { ImagePlus, Link2, Trash2 } from "lucide-react";
+import { hasElectronHost } from "@/lib/pmai/ipc.ts";
+import { attachedMedia, formatBytes } from "@/lib/pmai/media.ts";
+import { previewOf } from "@/lib/pmai/media-preview.ts";
+import type { MediaAsset } from "@/lib/pmai/types.ts";
 import type { usePmai } from "@/lib/pmai/use-pmai.ts";
 
 export function Dashboard({
@@ -12,47 +17,203 @@ export function Dashboard({
 }) {
   const { snap, gate, pendingApprovals, needsCheck } = api;
   return (
-    <section style={{ maxWidth: 860, margin: "0 auto" }}>
-      <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 32, margin: 0 }}>Làm gì tiếp theo</h1>
-      <p className="pmai-hint" style={{ marginTop: 8 }}>
-        Chrome đã login xong. Luồng chuẩn: chọn trang → soạn nháp → duyệt → PMAI đăng trên Chrome.
-      </p>
-      <div className="pmai-steps">
-        <div className="pmai-step">
-          <p className="pmai-step-n">Bước 1</p>
-          <h2 style={{ margin: "6px 0 8px", fontSize: 18 }}>Chọn trang đích</h2>
-          <p style={{ marginTop: 12, fontWeight: 600 }}>{snap.pages.find((p) => p.id === snap.selectedPageId)?.name ?? "Chưa chọn trang"}</p>
-        </div>
-        <div className="pmai-step">
-          <p className="pmai-step-n">Bước 2</p>
-          <h2 style={{ margin: "6px 0 8px", fontSize: 18 }}>Soạn bản nháp</h2>
-          <button type="button" className="pmai-btn" style={{ marginTop: 12 }} onClick={onCompose} disabled={!gate.ok}>
-            Tạo bài đăng
-          </button>
-        </div>
-        <div className="pmai-step">
-          <p className="pmai-step-n">Bước 3</p>
-          <h2 style={{ margin: "6px 0 8px", fontSize: 18 }}>Duyệt rồi đăng</h2>
-          <button type="button" className="pmai-btn-ghost" style={{ marginTop: 12 }} onClick={onApprove}>
-            Mở hàng duyệt ({pendingApprovals.length})
-          </button>
-        </div>
+    <section className="mx-auto max-w-3xl">
+      <h1 className="font-serif text-3xl">Tổng quan</h1>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={onCompose}
+          disabled={!gate.ok}
+          className="h-12 rounded-md bg-accent px-5 font-sans text-sm font-medium text-accent-fg disabled:opacity-40"
+        >
+          Tạo bài đăng
+        </button>
+        {!gate.ok ? <p className="self-center font-sans text-sm text-muted">{gate.reason}</p> : null}
+      </div>
+      <div className="mt-8 grid gap-4 sm:grid-cols-3">
+        {[
+          ["Chờ duyệt", pendingApprovals.length],
+          ["Cần kiểm tra kết quả", needsCheck.length],
+          ["Đã đăng", snap.tasks.filter((t) => t.status === "SUCCESS").length],
+        ].map(([k, v]) => (
+          <div key={String(k)} className="rounded-xl border border-border bg-surface p-4 shadow-panel">
+            <p className="font-sans text-xs text-subtle uppercase">{k}</p>
+            <p className="mt-2 font-serif text-3xl">{v}</p>
+          </div>
+        ))}
       </div>
       {needsCheck.length ? (
-        <div className="pmai-card" style={{ marginTop: 20, background: "var(--color-warn-bg)" }}>
+        <div className="mt-6 rounded-xl border border-warn/40 bg-warn-bg p-4">
+          <p className="font-sans text-sm font-medium text-warn">Cần kiểm tra kết quả — bài có thể đã lên</p>
           {needsCheck.map((t) => (
-            <div key={t.id} style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button type="button" className="pmai-btn" onClick={() => api.confirm(t.id, true)}>
+            <div key={t.id} className="mt-3 flex flex-wrap gap-2">
+              <button type="button" className="h-11 rounded-md bg-accent px-3 text-sm text-accent-fg" onClick={() => api.confirm(t.id, true)}>
                 Đã thấy bài
               </button>
-              <button type="button" className="pmai-btn-ghost" onClick={() => api.confirm(t.id, false)}>
+              <button type="button" className="h-11 rounded-md border border-border px-3 text-sm" onClick={() => api.confirm(t.id, false)}>
                 Không thấy bài
               </button>
             </div>
           ))}
         </div>
       ) : null}
+      {pendingApprovals.length ? (
+        <button type="button" onClick={onApprove} className="mt-6 font-sans text-sm text-accent underline">
+          Có {pendingApprovals.length} bài chờ duyệt
+        </button>
+      ) : null}
     </section>
+  );
+}
+
+function MediaThumb({ m }: { m: MediaAsset }) {
+  const src = previewOf(m.id);
+  return (
+    <div className="relative aspect-square overflow-hidden rounded-md bg-info-bg">
+      {m.type === "video" ? (
+        src ? (
+          <video src={src} className="size-full object-cover" muted playsInline />
+        ) : (
+          <div className="flex size-full items-center justify-center text-xs text-muted">Video</div>
+        )
+      ) : src ? (
+        <img src={src} alt={m.name} className="size-full object-cover" />
+      ) : (
+        <div className="flex size-full items-center justify-center p-2 text-center text-xs text-muted">{m.name}</div>
+      )}
+    </div>
+  );
+}
+
+function MediaLibrary({
+  draftId,
+  media,
+  api,
+}: {
+  draftId: string;
+  media: MediaAsset[];
+  api: ReturnType<typeof usePmai>;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const [url, setUrl] = useState("");
+
+  async function takeFiles(files: FileList | File[] | null) {
+    if (!files || (files as FileList).length === 0) return;
+    await api.ingestFiles(draftId, files);
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+      <p className="font-sans text-xs font-medium uppercase tracking-wide text-subtle">Media</p>
+      <button
+        type="button"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          void takeFiles(e.dataTransfer.files);
+        }}
+        onClick={async () => {
+          if (hasElectronHost()) {
+            const ok = await api.pickFromDisk(draftId);
+            if (!ok) inputRef.current?.click();
+            return;
+          }
+          inputRef.current?.click();
+        }}
+        className={`flex min-h-14 w-full items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-5 text-center ${
+          over ? "border-accent bg-info-bg" : "border-border bg-bg"
+        }`}
+      >
+        <ImagePlus className="size-5 text-accent" strokeWidth={1.6} />
+        <span className="font-sans text-sm font-medium">+ Chọn ảnh/video</span>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            void takeFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+      </button>
+      <p className="text-center text-xs text-muted">hoặc</p>
+      <div className="flex gap-2">
+        <input
+          className="h-11 min-w-0 flex-1 rounded-md border border-border bg-bg px-3 text-sm"
+          placeholder="https://… hoặc C:\\Users\\Admin\\Pictures\\a.jpg"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <button
+          type="button"
+          className="inline-flex h-11 items-center gap-1 rounded-md border border-border px-3 text-sm"
+          onClick={() => {
+            void api.importMediaUrl(draftId, url);
+            setUrl("");
+          }}
+        >
+          <Link2 className="size-4" />
+          Import URL
+        </button>
+      </div>
+      <p className="text-[11px] text-muted">
+        Electron dùng hộp thoại PMAI (path Windows thật). Không bấm Open của Facebook — Playwright gắn file bằng
+        input ẩn.
+      </p>
+      {media.length ? (
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {media.map((m) => {
+            const ready = Boolean((m.localPath || m.sourceUrl || "").trim());
+            return (
+              <li key={m.id} className="rounded-lg border border-border bg-bg p-2">
+                <div className="flex gap-2">
+                  <div className="w-16 shrink-0">
+                    <MediaThumb m={m} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-sans text-sm font-medium">{m.name}</p>
+                    <p className="text-xs text-muted">
+                      {m.type} · {formatBytes(m.size)}
+                      {m.attach === false ? " · bỏ kèm" : ""}
+                    </p>
+                    <p className={`mt-1 truncate text-[11px] ${ready ? "text-muted" : "text-warn"}`}>
+                      {m.localPath || m.sourceUrl || "chưa có path máy — chọn lại"}
+                    </p>
+                    <label className="mt-1 flex min-h-9 items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        className="size-4"
+                        checked={m.attach !== false}
+                        onChange={(e) => api.toggleMedia(draftId, m.id, e.target.checked)}
+                      />
+                      Đăng kèm
+                    </label>
+                    <button
+                      type="button"
+                      className="inline-flex h-9 items-center gap-1 text-xs text-danger"
+                      onClick={() => api.removeMedia(draftId, m.id)}
+                    >
+                      <Trash2 className="size-3.5" />
+                      Xóa
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted">Chưa chọn file. Tối đa 10 ảnh, hoặc 1 video — không lẫn hai loại.</p>
+      )}
+    </div>
   );
 }
 
@@ -68,24 +229,25 @@ export function Compose({
   const { snap, gate } = api;
   const [brief, setBrief] = useState("Tour Hà Giang mùa thu, 2 ngày 1 đêm");
   const draft = snap.contents.find((c) => c.id === draftId) ?? snap.contents[0];
+  const page = snap.pages.find((p) => p.id === snap.selectedPageId);
 
   return (
-    <section style={{ display: "grid", gap: 24, maxWidth: 980, margin: "0 auto" }} className="lg:grid-cols-2">
+    <section className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-2">
       <div>
-        <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 32, margin: 0 }}>Tạo bài đăng</h1>
-        <p className="pmai-hint" style={{ marginTop: 8 }}>
-          Chọn nhiều ảnh local — app lưu đường dẫn. Tick ảnh nào đăng kèm caption.
+        <h1 className="font-serif text-3xl">Tạo bài đăng</h1>
+        <p className="mt-2 text-sm text-muted">
+          AI soạn nháp local. Ảnh/video lưu path máy bạn. Chrome chỉ mở sau khi duyệt.
         </p>
+        <p className="mt-2 text-xs text-subtle">Trang đích: {page?.name ?? "—"}</p>
         <textarea
-          style={{ marginTop: 16, minHeight: 120, width: "100%", borderRadius: 8, border: "1px solid var(--color-border)", padding: 12, font: "inherit" }}
+          className="mt-4 min-h-32 w-full rounded-md border border-border bg-surface p-3 font-sans text-sm"
           value={brief}
           onChange={(e) => setBrief(e.target.value)}
         />
         <button
           type="button"
-          className="pmai-btn"
-          style={{ marginTop: 12 }}
           disabled={!gate.ok}
+          className="mt-3 h-12 rounded-md bg-accent px-5 text-sm font-medium text-accent-fg disabled:opacity-40"
           onClick={async () => {
             const c = await api.createDraft(brief);
             if (c) setDraftId(c.id);
@@ -93,47 +255,62 @@ export function Compose({
         >
           Soạn bản nháp
         </button>
+        {!gate.ok ? <p className="mt-2 text-sm text-muted">{gate.reason}</p> : null}
+
+        {draft ? (
+          <div className="mt-8">
+            <p className="font-sans text-xs text-subtle uppercase">Media kèm bài · {draft.status}</p>
+            <div className="mt-3">
+              <MediaLibrary draftId={draft.id} media={draft.media} api={api} />
+            </div>
+          </div>
+        ) : null}
       </div>
-      <div className="pmai-card">
+      <div className="rounded-xl border border-border bg-surface p-5 shadow-panel">
         {draft ? (
           <>
-            <p className="pmai-step-n">Bản nháp · {draft.status}</p>
+            <p className="font-sans text-xs text-subtle uppercase">Bản nháp AI · {draft.status}</p>
             <textarea
-              style={{ marginTop: 12, minHeight: 160, width: "100%", borderRadius: 8, border: "1px solid var(--color-border)", padding: 12, fontFamily: "var(--font-serif)", fontSize: 16 }}
+              className="mt-3 min-h-48 w-full rounded-md border border-border p-3 font-serif text-base"
               value={draft.body}
               onChange={(e) => api.updateDraft(draft.id, e.target.value, draft.media)}
             />
-            <div style={{ marginTop: 16 }}>
-              <button type="button" className="pmai-btn-ghost" onClick={() => api.pickImages(draft.id)}>
-                Chọn ảnh từ máy (nhiều file)
-              </button>
-              <ul style={{ listStyle: "none", padding: 0, margin: "12px 0 0" }}>
-                {draft.media.map((m) => (
-                  <li key={m.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8 }}>
-                    <input
-                      type="checkbox"
-                      checked={m.attach !== false}
-                      onChange={(e) => api.toggleMedia(draft.id, m.id, e.target.checked)}
-                    />
-                    <span style={{ fontSize: 13 }}>
-                      <strong>{m.name}</strong>
-                      <br />
-                      <span className="pmai-hint">{m.localPath || "(chưa có đường dẫn — chọn lại bằng nút ở trên)"}</span>
-                    </span>
-                    <button type="button" className="pmai-btn-ghost" onClick={() => api.removeMedia(draft.id, m.id)}>
-                      Xóa
-                    </button>
-                  </li>
+            {draft.unverifiedClaims.length ? (
+              <ul className="mt-3 space-y-1 rounded-md bg-warn-bg p-3 text-sm text-warn">
+                {draft.unverifiedClaims.map((c) => (
+                  <li key={c}>Chưa xác minh — {c}</li>
                 ))}
               </ul>
-              {!draft.media.length ? <p className="pmai-hint">Chưa chọn ảnh. Caption vẫn đăng được.</p> : null}
+            ) : null}
+            <div className="mt-4 rounded-xl border border-border bg-bg p-4">
+              <p className="text-xs text-subtle uppercase">Xem trước composer</p>
+              <p className="mt-2 whitespace-pre-wrap font-serif text-sm">{draft.body}</p>
+              {draft.media.filter((m) => m.attach !== false).length ? (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {draft.media
+                    .filter((m) => m.attach !== false)
+                    .map((m) => (
+                      <MediaThumb key={m.id} m={m} />
+                    ))}
+                </div>
+              ) : null}
             </div>
-            <button type="button" className="pmai-btn" style={{ marginTop: 16 }} onClick={() => api.submit(draft.id)}>
+            {hasElectronHost() && attachedMedia(draft.media).some((m) => !m.localPath && !m.sourceUrl) ? (
+              <p className="mt-3 text-sm text-warn">
+                Ảnh chưa có đường dẫn máy. Bấm «Chọn từ máy» (hộp thoại PMAI). Không dùng id med_.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="mt-4 h-12 rounded-md bg-accent px-5 text-sm font-medium text-accent-fg"
+              disabled={hasElectronHost() && attachedMedia(draft.media).some((m) => !m.localPath && !m.sourceUrl)}
+              onClick={() => api.submit(draft.id)}
+            >
               Gửi duyệt
             </button>
           </>
         ) : (
-          <p className="pmai-hint">Chưa có bản nháp.</p>
+          <p className="text-sm text-muted">Chưa có bản nháp. Soạn bên trái trước.</p>
         )}
       </div>
     </section>
@@ -144,31 +321,46 @@ export function Approve({ api }: { api: ReturnType<typeof usePmai> }) {
   const { snap } = api;
   const items = snap.approvals.filter((a) => a.status === "PENDING" || a.status === "APPROVED");
   return (
-    <section style={{ maxWidth: 680, margin: "0 auto" }}>
-      <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 32, margin: 0 }}>Duyệt</h1>
-      {items.length === 0 ? <p className="pmai-hint" style={{ marginTop: 16 }}>Không có yêu cầu.</p> : null}
-      <ul style={{ listStyle: "none", padding: 0, margin: "24px 0 0", display: "grid", gap: 16 }}>
+    <section className="mx-auto max-w-2xl">
+      <h1 className="font-serif text-3xl">Duyệt</h1>
+      {items.length === 0 ? <p className="mt-4 text-sm text-muted">Không có yêu cầu. Hàng đợi trống là tin tốt.</p> : null}
+      <ul className="mt-6 space-y-4">
         {items.map((a) => {
           const c = snap.contents.find((x) => x.id === a.contentId);
           const t = snap.tasks.find((x) => x.id === a.taskId);
           const page = snap.pages.find((p) => p.id === a.pageTargetId);
-          const shots = (c?.media ?? []).filter((m) => m.attach !== false);
+          const shots = c?.media.filter((m) => m.attach !== false) ?? [];
           return (
-            <li key={a.id} className="pmai-card">
-              <p className="pmai-step-n">
-                {page?.name} · {a.status}
+            <li key={a.id} className="rounded-xl border border-border bg-surface p-5 shadow-panel">
+              <p className="text-xs text-subtle">
+                {page?.name} · {a.status} · hash {a.contentRevisionHash.slice(0, 8)}
               </p>
-              <p style={{ marginTop: 12, whiteSpace: "pre-wrap", fontFamily: "var(--font-serif)", fontSize: 18 }}>{c?.body}</p>
+              <p className="mt-3 whitespace-pre-wrap font-serif text-lg">{c?.body}</p>
               {shots.length ? (
-                <p className="pmai-hint" style={{ marginTop: 8 }}>
-                  Ảnh kèm: {shots.map((m) => m.name).join(", ")}
-                </p>
-              ) : null}
+                <div className="mt-3 space-y-2">
+                  {shots.map((m) => (
+                    <div key={m.id} className="flex gap-2">
+                      <div className="w-16 shrink-0">
+                        <MediaThumb m={m} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm">{m.name}</p>
+                        <p className={`truncate text-[11px] ${m.localPath || m.sourceUrl ? "text-muted" : "text-warn"}`}>
+                          {m.localPath || m.sourceUrl || "thiếu path máy — không đăng được"}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-muted">Không đính kèm media</p>
+              )}
+              {c?.unverifiedClaims.length ? <p className="mt-2 text-sm text-warn">Chưa xác minh: {c.unverifiedClaims.join(" · ")}</p> : null}
               {a.status === "PENDING" ? (
-                <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className="pmai-btn"
+                    className="h-11 rounded-md bg-accent px-4 text-sm text-accent-fg"
                     onClick={async () => {
                       await api.decide(a.id, "APPROVE");
                       if (t) await api.execute(t.id);
@@ -176,13 +368,26 @@ export function Approve({ api }: { api: ReturnType<typeof usePmai> }) {
                   >
                     Duyệt & cho phép đăng
                   </button>
-                  <button type="button" className="pmai-btn-ghost" onClick={() => api.decide(a.id, "REJECT")}>
-                    Từ chối
+                  <button type="button" className="h-11 rounded-md border border-border px-4 text-sm" onClick={() => api.decide(a.id, "REJECT")}>
+                    Từ chối bài này
                   </button>
+                  <button type="button" className="h-11 rounded-md border border-border px-4 text-sm" onClick={() => api.decide(a.id, "CANCEL")}>
+                    Hủy task
+                  </button>
+                  {c ? (
+                    <button type="button" className="h-11 rounded-md border border-border px-4 text-sm" onClick={() => api.clone(c.id)}>
+                      Nhân bản để sửa
+                    </button>
+                  ) : null}
                 </div>
+              ) : t?.status === "QUEUED" ? (
+                <button type="button" className="mt-4 h-11 rounded-md bg-accent px-4 text-sm text-accent-fg" onClick={() => t && api.execute(t.id)}>
+                  Chạy đăng trên Chrome
+                </button>
               ) : (
-                <p className="pmai-hint" style={{ marginTop: 12 }}>
+                <p className="mt-3 text-sm">
                   Task: {t?.status}
+                  {t?.permalink ? ` · ${t.permalink}` : ""}
                 </p>
               )}
             </li>

@@ -19,6 +19,8 @@ const ALLOWLIST = [
   "chrome.createProfile",
   "chrome.cloneProfile",
   "chrome.pickImages",
+  "chrome.saveMedia",
+  "chrome.resolveMedia",
   "chrome.observe",
   "chrome.goto",
   "chrome.type",
@@ -83,17 +85,14 @@ function handleOnce(channel, fn) {
 
 function pickDirectory(payload) {
   if (payload && (payload.profileId || payload.directory)) return payload.profileId || payload.directory;
-  const list = chromeScan.listPmaiProfiles();
+  if (typeof chromeScan.listPmaiProfiles === "function") {
+    const list = chromeScan.listPmaiProfiles();
+    const pick = chromeScan.pickLoggedInChromeProfile(list);
+    return (pick && (pick.id || pick.directory)) || null;
+  }
+  const list = chromeScan.listChromeProfiles();
   const pick = chromeScan.pickLoggedInChromeProfile(list);
-  return (pick && pick.id) || null;
-}
-
-function guessMime(fp) {
-  const ext = path.extname(fp).toLowerCase();
-  if (ext === ".png") return "image/png";
-  if (ext === ".webp") return "image/webp";
-  if (ext === ".gif") return "image/gif";
-  return "image/jpeg";
+  return (pick && pick.directory) || "Default";
 }
 
 function createWindow() {
@@ -130,24 +129,54 @@ function createWindow() {
 function registerIpc() {
   handleOnce("chrome.listProfiles", wrap(async () => adapter().listProfiles()));
   handleOnce("chrome.status", wrap(async () => adapter().status()));
-  handleOnce("chrome.createProfile", wrap(async (payload) => adapter().createProfile(payload || {})));
-  handleOnce("chrome.cloneProfile", wrap(async (payload) => adapter().cloneProfile(payload || {})));
+  handleOnce(
+    "chrome.createProfile",
+    wrap(async (payload) => {
+      if (typeof adapter().createProfile === "function") return adapter().createProfile(payload || {});
+      throw Object.assign(new Error("Adapter khong ho tro createProfile."), { code: "CAPABILITY_MISSING" });
+    }),
+  );
+  handleOnce(
+    "chrome.cloneProfile",
+    wrap(async (payload) => {
+      if (typeof adapter().cloneProfile === "function") return adapter().cloneProfile(payload || {});
+      throw Object.assign(new Error("Adapter khong ho tro cloneProfile."), { code: "CAPABILITY_MISSING" });
+    }),
+  );
   handleOnce(
     "chrome.pickImages",
     wrap(async () => {
       const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
       const r = await dialog.showOpenDialog(win, {
-        title: "Chọn ảnh đăng kèm",
+        title: "Chon anh hoac video",
         properties: ["openFile", "multiSelections"],
-        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+        filters: [
+          { name: "Anh va video", extensions: ["jpg", "jpeg", "png", "webp", "gif", "mp4", "mov", "webm", "m4v"] },
+        ],
       });
-      if (r.canceled) return [];
-      return r.filePaths.map((fp) => ({
+      if (r.canceled) return { files: [] };
+      const mime = require("./media-upload.cjs").mimeFromExt;
+      const files = r.filePaths.map((fp) => ({
+        path: fp,
         localPath: fp,
         name: path.basename(fp),
         size: fs.statSync(fp).size,
-        mimeType: guessMime(fp),
+        mimeType: mime(fp),
       }));
+      return { files };
+    }),
+  );
+  handleOnce(
+    "chrome.saveMedia",
+    wrap(async (payload) => require("./media-upload.cjs").persistBuffer(payload || {})),
+  );
+  handleOnce(
+    "chrome.resolveMedia",
+    wrap(async (payload) => {
+      const media = require("./media-upload.cjs");
+      const service = new media.MediaUploadService();
+      const prepared = await service.prepare([payload && payload.source]);
+      return { path: prepared.files[0], kind: prepared.kind };
     }),
   );
   handleOnce(
@@ -167,7 +196,21 @@ function registerIpc() {
   handleOnce("chrome.observe", wrap(async () => adapter().observe()));
   handleOnce("chrome.goto", wrap(async (payload) => adapter().goto(payload.url)));
   handleOnce("chrome.type", wrap(async (payload) => adapter().typeText(payload.name, payload.text)));
-  handleOnce("chrome.upload", wrap(async (payload) => adapter().uploadFiles(payload.files)));
+  handleOnce(
+    "chrome.upload",
+    wrap(async (payload) => {
+      const files = Array.isArray(payload && payload.files) ? payload.files : [];
+      const media = require("./media-upload.cjs");
+      for (const f of files) {
+        if (media.looksLikeMediaId(f)) {
+          const e = new Error(`Khong upload id noi bo: ${f}. Chon lai anh tu may.`);
+          e.code = "NOT_READY";
+          throw e;
+        }
+      }
+      return adapter().uploadFiles(files);
+    }),
+  );
   handleOnce("chrome.click", wrap(async (payload) => adapter().clickNamed(payload.name)));
   handleOnce("chrome.screenshot", wrap(async () => adapter().screenshotPng()));
   handleOnce("chrome.close", wrap(async () => adapter().closeBrowser()));

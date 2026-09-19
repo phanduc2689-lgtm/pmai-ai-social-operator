@@ -42,6 +42,9 @@ export type ApprovalStatus =
 
 export type ConnectionMode = "ATTACH_EXISTING" | "MANAGED_PROFILE";
 
+export type MediaKind = "image" | "video";
+export type MediaUploadState = "PENDING" | "READY" | "FAILED";
+
 export interface BrowserProfile {
   id: string;
   name: string;
@@ -70,13 +73,18 @@ export interface PageTarget {
 
 export interface MediaAsset {
   id: string;
-  type: "image";
+  type: MediaKind;
   name: string;
   checksum: string;
   mimeType: string;
   size: number;
+  /** Absolute filesystem path — required for Chrome setInputFiles. */
   localPath?: string;
+  /** Remote URL that was downloaded to a temp file. */
+  sourceUrl?: string;
+  /** Tick: include this file when publishing. Default true. */
   attach?: boolean;
+  uploadState?: MediaUploadState;
 }
 
 export interface ContentItem {
@@ -130,6 +138,19 @@ export interface BrandFacts {
   policyNote: string;
 }
 
+export interface VoiceProfile {
+  enabled: boolean;
+  samples: string[];
+  notes: string;
+}
+
+export interface ContactTemplate {
+  id: string;
+  name: string;
+  body: string;
+  isDefault: boolean;
+}
+
 export interface LlmSettingsPublic {
   provider: "openai" | "gemini" | "anthropic" | "xai" | "mock";
   model: string;
@@ -143,6 +164,9 @@ export interface WorkspaceState {
   name: string;
   operatorName: string;
   brandFacts: BrandFacts;
+  voice: VoiceProfile;
+  contactTemplates: ContactTemplate[];
+  appendFooter: boolean;
   idleCloseMinutes: number;
   keepBrowserOpen: boolean;
   llm: LlmSettingsPublic;

@@ -2,6 +2,7 @@ import { FakeBrowserAdapter, hasComposerSideEffect, type BrowserAdapter } from "
 import { PmaiError } from "./errors.ts";
 import { contentRevisionHash, newId, nowIso } from "./hash.ts";
 import { createLlmClient, extractClaims, type LlmClient } from "./llm.ts";
+import { assertCompatibleMedia, detectMediaKind, uploadPaths } from "./media.ts";
 import { assertPublishAllowed, evaluatePolicy } from "./policy.ts";
 import { redact } from "./redact.ts";
 import { parseTaskDsl, type LlmProvider } from "./schema.ts";
@@ -10,14 +11,16 @@ import type {
   Approval,
   BrandFacts,
   BrowserProfile,
+  ContactTemplate,
   ContentItem,
   MediaAsset,
   PageTarget,
   Task,
+  VoiceProfile,
   WorkspaceState,
 } from "./types.ts";
 
-const STORAGE_KEY = "pmai.store.v1";
+const STORAGE_KEY = "pmai.store.v2";
 
 export interface EngineDeps {
   llm?: LlmClient;
@@ -53,15 +56,31 @@ export class PmaiEngine {
 
   private persist() {
     if (typeof localStorage === "undefined") return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.snapshot()));
+    const copy = this.snapshot();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(copy));
   }
 
   private hydrate() {
     if (typeof localStorage === "undefined") return;
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem("pmai.store.v1");
     if (!raw) return;
     try {
-      this.state = { ...emptyWorkspace(), ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw) as Partial<WorkspaceState>;
+      this.state = {
+        ...emptyWorkspace(),
+        ...parsed,
+        brandFacts: { ...emptyWorkspace().brandFacts, ...parsed.brandFacts },
+        voice: { ...emptyWorkspace().voice, ...parsed.voice },
+        contactTemplates: parsed.contactTemplates ?? [],
+        contents: (parsed.contents ?? []).map((c) => ({
+          ...c,
+          media: (c.media ?? []).map((m) => ({
+            ...m,
+            type: m.type === "video" ? "video" : "image",
+            attach: m.attach !== false,
+          })),
+        })),
+      };
     } catch {
       /* ignore */
     }
@@ -163,12 +182,11 @@ export class PmaiEngine {
       throw new PmaiError("SCHEMA_INVALID", "URL phải bắt đầu bằng https://www.facebook.com/");
     }
     url = url.replace(/\/$/, "");
-    const existing = this.state.pages.find((p) => p.url.replace(/\/$/, "") === url);
+    const existing = this.state.pages.find((p) => p.url === url);
     if (existing) {
       existing.name = name;
-      this.log("page.update", "OK", `${existing.name} ${existing.url}`);
       this.persist();
-      return this.selectPage(existing.id);
+      return existing;
     }
     const page: PageTarget = {
       id: newId("pg"),
@@ -180,29 +198,18 @@ export class PmaiEngine {
     this.state.pages.push(page);
     this.log("page.add", "OK", `${page.name} ${page.url}`);
     this.persist();
-    return this.selectPage(page.id);
+    return page;
   }
 
   removePage(pageId: string) {
     const page = this.state.pages.find((p) => p.id === pageId);
     if (!page) throw new PmaiError("NOT_READY", "Không tìm thấy trang.");
-    const blocking = this.state.tasks.some(
-      (t) => t.pageTargetId === pageId && (t.status === "RUNNING" || t.status === "WAITING_APPROVAL" || t.status === "QUEUED"),
-    );
-    if (blocking) throw new PmaiError("IDLE_BLOCKED", "Trang đang có task chờ/chạy — không xóa.");
     this.state.pages = this.state.pages.filter((p) => p.id !== pageId);
     if (this.state.selectedPageId === pageId) {
-      this.state.selectedPageId = this.state.pages[0]?.id ?? null;
-      if (this.state.selectedPageId) {
-        this.state.pages = this.state.pages.map((p) => ({
-          ...p,
-          status: p.id === this.state.selectedPageId ? "VERIFIED" : p.status === "VERIFIED" ? "UNSELECTED" : p.status,
-        }));
-      }
+      this.state.selectedPageId = null;
     }
-    this.log("page.remove", "OK", `${page.name} ${page.url}`);
+    this.log("page.remove", "OK", page.name);
     this.persist();
-    return page;
   }
 
   selectPage(pageId: string) {
@@ -222,6 +229,23 @@ export class PmaiEngine {
   setBrandFacts(facts: BrandFacts) {
     this.state.brandFacts = facts;
     this.log("brand.update", "OK", facts.pageName);
+    this.persist();
+  }
+
+  setVoice(voice: VoiceProfile) {
+    this.state.voice = {
+      enabled: Boolean(voice.enabled),
+      samples: voice.samples.slice(0, 8).map((s) => s.slice(0, 1500)),
+      notes: voice.notes.slice(0, 1000),
+    };
+    this.log("voice.update", "OK", `${this.state.voice.samples.filter(Boolean).length} mẫu`);
+    this.persist();
+  }
+
+  setContactTemplates(templates: ContactTemplate[], appendFooter: boolean) {
+    this.state.contactTemplates = templates.slice(0, 8);
+    this.state.appendFooter = appendFooter;
+    this.log("contact.update", "OK", `${templates.length} mẫu`);
     this.persist();
   }
 
@@ -268,22 +292,34 @@ export class PmaiEngine {
     if (!gate.ok) throw new PmaiError("NOT_READY", gate.reason);
     const page = this.selectedPage();
     if (!page) throw new PmaiError("NOT_READY", "Chưa chọn trang.");
+    const samples = this.state.voice.enabled
+      ? this.state.voice.samples.filter((s) => s.trim()).join("\n---\n")
+      : "";
+    const notes = this.state.voice.enabled ? this.state.voice.notes : "";
     const raw = await this.llm.completeJson<{ body: string; unverifiedClaims?: string[] }>({
       purpose: "content",
       schemaName: "DraftResult",
-      system: "You write Facebook page posts in Vietnamese. Do not invent prices.",
-      user: `Brand: ${JSON.stringify(this.state.brandFacts)}\nBrief: ${brief}`,
+      system:
+        "You write Facebook page posts in Vietnamese. Do not invent prices. Stay faithful to Brand Facts." +
+        (samples ? `\nMimic this writing style:\n${samples}` : "") +
+        (notes ? `\nAvoid: ${notes}` : ""),
+      user: `Brand: ${JSON.stringify(this.state.brandFacts)}\nPage: ${page.name}\nBrief: ${brief}`,
     });
-    const body =
-      raw.body?.trim() && !/Brand:\s*\{/.test(raw.body)
-        ? raw.body
-        : [brief.trim(), "", "Liên hệ fanpage để đặt chỗ."].filter(Boolean).join("\n");
+    let body = raw.body?.trim() ? raw.body : `Bản nháp cho: ${brief}`;
+    const footer = this.defaultFooter();
+    if (this.state.appendFooter && footer && !body.includes(footer)) {
+      body = `${body.trim()}\n\n${footer}`;
+    }
     const factsClaims = extractClaims(body, {
       hotline: this.state.brandFacts.hotline,
       priceNote: this.state.brandFacts.priceNote,
     });
     const media: MediaAsset[] = [];
-    const revisionHash = await contentRevisionHash({ body, mediaChecksums: [], pageTargetId: page.id });
+    const revisionHash = await contentRevisionHash({
+      body,
+      mediaChecksums: [],
+      pageTargetId: page.id,
+    });
     const content: ContentItem = {
       id: newId("cnt"),
       pageTargetId: page.id,
@@ -300,6 +336,11 @@ export class PmaiEngine {
     this.log("content.draft", "OK", content.id);
     this.persist();
     return content;
+  }
+
+  private defaultFooter(): string {
+    const def = this.state.contactTemplates.find((t) => t.isDefault) ?? this.state.contactTemplates[0];
+    return def?.body.trim() ?? "";
   }
 
   async updateDraft(contentId: string, body: string, media: MediaAsset[] = []) {
@@ -328,22 +369,51 @@ export class PmaiEngine {
     return c;
   }
 
-  addLocalImage(contentId: string, file: { name: string; size: number; mimeType: string }) {
-    if (!file.mimeType.startsWith("image/")) {
-      throw new PmaiError("SCHEMA_INVALID", "MVP1 chỉ nhận ảnh local.");
-    }
+  addLocalImage(
+    contentId: string,
+    file: { name: string; size: number; mimeType: string; localPath?: string; sourceUrl?: string; attach?: boolean },
+  ) {
+    return this.addLocalMedia(contentId, file);
+  }
+
+  addLocalMedia(
+    contentId: string,
+    file: { name: string; size: number; mimeType: string; localPath?: string; sourceUrl?: string; attach?: boolean },
+  ) {
+    const kind = detectMediaKind(file);
     const c = this.requireContent(contentId);
+    assertCompatibleMedia(c.media, kind);
     const asset: MediaAsset = {
       id: newId("med"),
-      type: "image",
+      type: kind,
       name: file.name,
-      checksum: `${file.size}-${file.name}`,
-      mimeType: file.mimeType,
+      checksum: `${file.size}-${file.name}-${file.localPath ?? file.sourceUrl ?? ""}`,
+      mimeType: file.mimeType || (kind === "video" ? "video/mp4" : "image/jpeg"),
       size: file.size,
+      localPath: file.localPath,
+      sourceUrl: file.sourceUrl,
+      attach: file.attach !== false,
+      uploadState: "READY",
     };
     c.media = [...c.media, asset];
     c.humanModified = true;
+    this.log("media.add", "OK", `${kind} ${file.name}`);
     return this.updateDraft(contentId, c.body, c.media);
+  }
+
+  toggleMediaAttach(contentId: string, mediaId: string, attach: boolean) {
+    const c = this.requireContent(contentId);
+    const media = c.media.map((m) => (m.id === mediaId ? { ...m, attach } : m));
+    return this.updateDraft(contentId, c.body, media);
+  }
+
+  removeMedia(contentId: string, mediaId: string) {
+    const c = this.requireContent(contentId);
+    return this.updateDraft(
+      contentId,
+      c.body,
+      c.media.filter((m) => m.id !== mediaId),
+    );
   }
 
   async submitForApproval(contentId: string) {
@@ -360,14 +430,21 @@ export class PmaiEngine {
         (t.status === "RUNNING" || t.status === "NEEDS_VERIFICATION" || t.status === "WAITING_APPROVAL"),
     );
     if (existing) throw new PmaiError("IDEMPOTENT_REJECT", "Task cùng nội dung đang chờ hoặc chạy.");
+
     const dsl = parseTaskDsl({
       dslVersion: "2.1",
       type: "PUBLISH_CONTENT",
       accountId: this.state.identity?.id ?? "none",
       pageTargetId: c.pageTargetId,
-      payload: { contentId: c.id, revisionHash: c.revisionHash, text: c.body, mediaIds: c.media.map((m) => m.id) },
+      payload: {
+        contentId: c.id,
+        revisionHash: c.revisionHash,
+        text: c.body,
+        mediaIds: c.media.filter((m) => m.attach !== false).map((m) => m.id),
+      },
       approval: { required: true },
     });
+
     const task: Task = {
       id: newId("tsk"),
       type: dsl.type,
@@ -439,6 +516,7 @@ export class PmaiEngine {
     const c = this.requireContent(t.contentId);
     const page = this.state.pages.find((p) => p.id === t.pageTargetId);
     if (!a || !page) throw new PmaiError("NOT_READY", "Thiếu approval hoặc trang.");
+
     assertPublishAllowed({
       approvalStatus: a.status,
       pageTargetId: t.pageTargetId,
@@ -446,8 +524,10 @@ export class PmaiEngine {
       revisionHash: c.revisionHash,
       approvalRevisionHash: a.contentRevisionHash,
     });
+
     const running = this.state.tasks.filter((x) => x.status === "RUNNING" && x.pageTargetId === t.pageTargetId);
     if (running.length) throw new PmaiError("IDLE_BLOCKED", "Account đang chạy một task.");
+
     const dup = this.state.tasks.find(
       (x) =>
         x.id !== t.id &&
@@ -456,11 +536,15 @@ export class PmaiEngine {
         (x.status === "RUNNING" || x.status === "NEEDS_VERIFICATION"),
     );
     if (dup) throw new PmaiError("IDEMPOTENT_REJECT", "Không retry khi đang chạy hoặc cần kiểm tra kết quả.");
+
     t.status = "RUNNING";
     this.log("task.start", "RUNNING", t.id, t.id);
     this.persist();
+
     const adapter = browser ?? this.browserFactory();
     this.lastBrowser = adapter;
+    const requirePath = adapter.kind !== "fake";
+
     try {
       if (this.state.identity?.sessionStatus !== "CONNECTED") {
         throw new PmaiError("AUTH_LOGOUT", "Phiên Facebook không CONNECTED.");
@@ -470,25 +554,40 @@ export class PmaiEngine {
       if (obs0.pageState === "captcha") throw new PmaiError("CAPTCHA_REQUIRED", "CAPTCHA — mở đúng hồ sơ.");
       if (obs0.pageState === "checkpoint") throw new PmaiError("CHECKPOINT", "Checkpoint — xử lý tay.");
       if (obs0.pageState === "login") throw new PmaiError("AUTH_LOGOUT", "Đã đăng xuất.");
+
       await adapter.goto(page.url);
       const obs1 = await adapter.observe();
       if (obs1.pageState === "login") throw new PmaiError("AUTH_LOGOUT", "Đã đăng xuất.");
-      if (!pageTargetMatches(obs1.url, obs1.pageName, page.url, page.name)) {
-        throw new PmaiError(
-          "ACCOUNT_MISMATCH",
-          `Sai Trang đích. Đang ở «${obs1.pageName || obs1.url}», cần «${page.name}» (${page.url}).`,
-        );
+      if (obs1.pageState === "captcha") throw new PmaiError("CAPTCHA_REQUIRED", "CAPTCHA — mở đúng hồ sơ.");
+      if (obs1.pageState === "checkpoint") throw new PmaiError("CHECKPOINT", "Checkpoint — xử lý tay.");
+      const urlOk = urlsLooselyMatch(obs1.url, page.url);
+      const nameOk = !obs1.pageName || namesLooselyMatch(obs1.pageName, page.name);
+      if (!urlOk && !nameOk) {
+        throw new PmaiError("ACCOUNT_MISMATCH", "Sai Trang đích.");
       }
+      if (this.selectedPage()?.url !== page.url) {
+        throw new PmaiError("ACCOUNT_MISMATCH", "Sai URL trang.");
+      }
+
       await adapter.click({ name: "composer" });
       await adapter.type({ role: "textbox", name: "composer" }, c.body);
-      if (c.media.length) await adapter.upload(c.media.map((m) => m.id));
+      const files = uploadPaths(c.media, requirePath);
+      if (files.length) {
+        this.log("media.upload", "RUNNING", files.map((f) => f.split(/[/\\]/).pop()).join(", "), t.id);
+        await adapter.upload(files);
+        this.log("media.upload", "OK", String(files.length), t.id);
+      }
+
       const preview = await adapter.observe();
       if (adapter instanceof FakeBrowserAdapter && !adapter.previewValid({ body: c.body, pageUrl: page.url })) {
         throw new PmaiError("PREVIEW_MISMATCH", "Preview không khớp bản đã duyệt.");
       }
-      if (!pageTargetMatches(preview.url || obs1.url, preview.pageName, page.url, page.name)) {
+      const previewUrlOk = urlsLooselyMatch(preview.url, page.url);
+      const previewNameOk = !preview.pageName || namesLooselyMatch(preview.pageName, page.name);
+      if (!previewUrlOk && !previewNameOk) {
         throw new PmaiError("PREVIEW_MISMATCH", "Preview sai trang.");
       }
+
       try {
         await adapter.click({ name: "Đăng" });
       } catch (e) {
@@ -499,6 +598,7 @@ export class PmaiEngine {
         this.persist();
         return t;
       }
+
       const permalink = `${page.url.replace(/\/$/, "")}/posts/${t.id.slice(-8)}`;
       await adapter.screenshot();
       t.status = "SUCCESS";
@@ -517,6 +617,9 @@ export class PmaiEngine {
       } else if (e instanceof PmaiError) {
         t.status = "FAILED";
         t.errorCode = e.code;
+        if (hasComposerSideEffect(adapter.calls) === false && e.code === "APPROVAL_REQUIRED") {
+          /* no-op */
+        }
       } else {
         t.status = "FAILED";
         t.errorCode = "BROWSER_CRASH";
@@ -549,7 +652,12 @@ export class PmaiEngine {
 
   cloneContent(contentId: string) {
     const c = this.requireContent(contentId);
-    const n: ContentItem = { ...c, id: newId("cnt"), status: "DRAFT", humanModified: true };
+    const n: ContentItem = {
+      ...c,
+      id: newId("cnt"),
+      status: "DRAFT",
+      humanModified: true,
+    };
     this.state.contents.unshift(n);
     this.log("content.clone", "OK", n.id);
     this.persist();
@@ -563,47 +671,31 @@ export class PmaiEngine {
   }
 }
 
-export function foldPageToken(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .replace(/\s*\|\s*facebook.*$/i, "")
-    .replace(/[^a-z0-9]+/g, "");
-}
-
 export function namesLooselyMatch(observed: string, expected: string): boolean {
-  const a = foldPageToken(observed);
-  const b = foldPageToken(expected);
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/\s*\|\s*facebook.*$/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const a = norm(observed);
+  const b = norm(expected);
   if (!a || !b) return true;
   return a === b || a.includes(b) || b.includes(a);
 }
 
 export function urlsLooselyMatch(observed: string, expected: string): boolean {
-  const slug = (u: string) =>
+  const norm = (u: string) =>
     u
       .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .replace(/facebook\.com/, "")
-      .replace(/[?#].*$/, "")
-      .replace(/\/+$/g, "")
-      .replace(/^\/+/, "");
-  const a = slug(observed);
-  const b = slug(expected);
+      .replace(/\/$/, "")
+      .replace(/^https?:\/\/(www\.)?/, "")
+      .split("?")[0]
+      .split("#")[0];
+  const a = norm(observed);
+  const b = norm(expected);
   if (!a || !b) return false;
-  return a === b || a.startsWith(b) || b.startsWith(a);
-}
-
-export function pageTargetMatches(
-  observedUrl: string,
-  observedName: string | null | undefined,
-  expectedUrl: string,
-  expectedName: string,
-): boolean {
-  if (urlsLooselyMatch(observedUrl || "", expectedUrl || "")) return true;
-  if (observedName && namesLooselyMatch(observedName, expectedName)) return true;
-  return false;
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
 function defaultModel(p: LlmProvider): string {
@@ -646,9 +738,18 @@ function emptyWorkspace(): WorkspaceState {
     name: "Workspace của tôi",
     operatorName: "Operator",
     brandFacts: { hotline: "", pageName: "", priceNote: "", policyNote: "" },
+    voice: { enabled: false, samples: [""], notes: "" },
+    contactTemplates: [],
+    appendFooter: false,
     idleCloseMinutes: 15,
     keepBrowserOpen: false,
-    llm: { provider: "mock", model: "mock-local", keyMasked: "", hasKey: true, lastPing: null },
+    llm: {
+      provider: "mock",
+      model: "mock-local",
+      keyMasked: "",
+      hasKey: true,
+      lastPing: null,
+    },
     profile: null,
     identity: null,
     pages: [],

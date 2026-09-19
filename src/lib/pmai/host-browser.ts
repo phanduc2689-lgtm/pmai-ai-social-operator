@@ -1,6 +1,7 @@
 import type { BrowserAdapter, BrowserCall, Observation, SemanticTarget } from "./browser.ts";
 import { PmaiError } from "./errors.ts";
 import { hostInvoke } from "./ipc.ts";
+import { looksLikeMediaId } from "./media.ts";
 
 export class HostBrowserAdapter implements BrowserAdapter {
   readonly kind = "electron-chrome";
@@ -37,6 +38,10 @@ export class HostBrowserAdapter implements BrowserAdapter {
   }
   async upload(files: string[]) {
     this.calls.push({ method: "upload", args: [files] });
+    const bad = files.find((f) => looksLikeMediaId(f));
+    if (bad) {
+      throw new PmaiError("NOT_READY", `Không upload id nội bộ ${bad}. Chọn lại ảnh từ máy.`);
+    }
     await this.call("chrome.upload", { files });
   }
   async click(target: SemanticTarget) {
