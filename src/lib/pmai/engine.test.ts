@@ -257,6 +257,10 @@ describe("invariants", () => {
     const raw = 'Khám phá cùng PMAI.\n\nBrand: {"hotline":"","pageName":"","priceNote":"","policyNote":""}';
     assert.equal(sanitizeComposerBody(raw), "Khám phá cùng PMAI.");
     assert.equal(sanitizeComposerBody('{"hotline":"","pageName":"x","priceNote":"","policyNote":""}'), "");
+    assert.equal(
+      sanitizeComposerBody("Khám phá cùng PMAI.\nPage: PM Travel\nBrief: Tour Hà Giang mùa thu, 2 ngày 1 đêm"),
+      "Khám phá cùng PMAI.",
+    );
   });
 
   it("does not treat Đăng ngay or Tiếp cận as the publish button", async () => {

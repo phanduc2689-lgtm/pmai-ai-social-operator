@@ -1,8 +1,9 @@
 "use strict";
 
 /**
- * Facebook Page publish state machine.
- * Click only exact «Đăng» / «Post» / «Tiếp» / «Next» inside the composer dialog.
+ * Two-phase Facebook Page publish:
+ *   1. Modal «Tạo bài viết»  → click exact «Tiếp»
+ *   2. Modal «Cài đặt bài viết» → click exact «Đăng»
  * Never match «Đăng ngay» or «Tiếp cận nhiều người…».
  */
 
@@ -38,7 +39,7 @@ async function visible(loc, timeout = 700) {
   }
 }
 
-async function firstVisible(cands, timeout = 1200) {
+async function firstVisible(cands, timeout = 800) {
   for (const loc of cands) {
     if (await visible(loc, timeout)) return loc;
   }
@@ -59,37 +60,21 @@ async function safeClick(loc) {
 }
 
 async function resolveDialog(page) {
-  const titled = dialogRoot(page).filter({ hasText: /cài đặt bài viết|tạo bài viết|create post|create a post/i });
-  if (await visible(titled.last(), 500)) return titled.last();
-  if (await visible(dialogRoot(page).last(), 500)) return dialogRoot(page).last();
+  const composer = dialogRoot(page).filter({ hasText: /tạo bài viết|create post|create a post/i });
+  const settings = dialogRoot(page).filter({ hasText: /cài đặt bài viết|post settings/i });
+  if (await visible(settings.last(), 400)) return settings.last();
+  if (await visible(composer.last(), 400)) return composer.last();
+  if (await visible(dialogRoot(page).last(), 400)) return dialogRoot(page).last();
   return dialogRoot(page).last();
 }
 
-function exactPublishButtons(dialog) {
-  return [
-    dialog.getByRole("button", { name: "Đăng", exact: true }),
-    dialog.getByRole("button", { name: "Post", exact: true }),
-    dialog.locator('[role="button"][aria-label="Đăng"]'),
-    dialog.locator('[role="button"][aria-label="Post"]'),
-    dialog.locator('button[aria-label="Đăng"], button[aria-label="Post"]'),
-  ];
-}
-
-function exactNextButtons(dialog) {
-  return [
-    dialog.getByRole("button", { name: "Tiếp", exact: true }),
-    dialog.getByRole("button", { name: "Next", exact: true }),
-    dialog.locator('[role="button"][aria-label="Tiếp"]'),
-    dialog.locator('[role="button"][aria-label="Next"]'),
-  ];
-}
-
 async function detectStage(page) {
-  const settings = page.getByText("Cài đặt bài viết", { exact: true }).first();
-  if (await visible(settings, 600)) return "POST_SETTINGS";
+  if (await visible(page.getByText("Cài đặt bài viết", { exact: true }).first(), 500)) return "POST_SETTINGS";
+  if (await visible(page.getByText("Tạo bài viết", { exact: true }).first(), 500)) return "COMPOSER_EDITING";
   const dlg = await resolveDialog(page);
-  if (await visible(dlg.getByText(/cài đặt bài viết|post settings/i).first(), 400)) return "POST_SETTINGS";
-  if (await visible(dlg, 400)) return "COMPOSER_EDITING";
+  if (await visible(dlg.getByText(/cài đặt bài viết|post settings/i).first(), 300)) return "POST_SETTINGS";
+  if (await visible(dlg.getByText(/tạo bài viết|create post/i).first(), 300)) return "COMPOSER_EDITING";
+  if (await visible(dlg, 300)) return "COMPOSER_EDITING";
   return "UNKNOWN";
 }
 
@@ -104,7 +89,7 @@ async function waitMediaPreview(page, timeout = 18000) {
   }
 }
 
-async function waitStage(page, want, timeout = 15000) {
+async function waitStage(page, want, timeout = 20000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     if ((await detectStage(page)) === want) return true;
@@ -113,8 +98,65 @@ async function waitStage(page, want, timeout = 15000) {
   return false;
 }
 
+/**
+ * Click a control whose innerText or aria-label equals one of `labels` exactly.
+ * Facebook Page composer uses div[role=button], not <button>.
+ */
+async function clickExactLabel(page, labels) {
+  const dlg = await resolveDialog(page);
+  try {
+    const handle = await dlg.elementHandle();
+    if (handle) {
+      const clicked = await handle.evaluate((root, names) => {
+        const sel = 'button, [role="button"], div[tabindex="0"], span[role="button"], a[role="button"]';
+        const nodes = [...root.querySelectorAll(sel)];
+        const hit = [...nodes].reverse().find((el) => {
+          if (!(el instanceof HTMLElement)) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 8 || rect.height < 8) return false;
+          const aria = (el.getAttribute("aria-label") || "").trim();
+          const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+          return names.includes(aria) || names.includes(text);
+        });
+        if (!hit) return false;
+        hit.click();
+        return true;
+      }, labels);
+      await handle.dispose();
+      if (clicked) return true;
+    }
+  } catch {
+    /* fall through to locators */
+  }
+
+  const locators = labels.flatMap((label) => [
+    dlg.getByRole("button", { name: label, exact: true }),
+    dlg.locator(`[aria-label="${label}"]`),
+    dlg.locator('[role="button"]').filter({ hasText: new RegExp(`^${label}$`) }),
+    dlg.getByText(label, { exact: true }),
+    page.getByRole("button", { name: label, exact: true }),
+    page.getByText(label, { exact: true }).last(),
+  ]);
+  const loc = await firstVisible(locators, 600);
+  if (!loc) return false;
+  await safeClick(loc);
+  return true;
+}
+
+async function clickComposerNext(page) {
+  return clickExactLabel(page, ["Tiếp", "Next"]);
+}
+
+async function clickExactPublish(page) {
+  return clickExactLabel(page, ["Đăng", "Post"]);
+}
+
 async function dialogHidden(page, timeout = 30000) {
-  const dlg = dialogRoot(page).filter({ hasText: /cài đặt bài viết|tạo bài viết|create post|bạn đang nghĩ gì/i }).last();
+  const dlg = dialogRoot(page)
+    .filter({ hasText: /cài đặt bài viết|tạo bài viết|create post|bạn đang nghĩ gì/i })
+    .last();
   try {
     await dlg.waitFor({ state: "hidden", timeout });
     return true;
@@ -131,39 +173,8 @@ async function verifyPublished(page) {
   for (const t of toasts) {
     if (await visible(t, 2500)) return true;
   }
-  const settings = page.getByText("Cài đặt bài viết", { exact: true }).first();
-  if (await visible(settings, 500)) return false;
-  const composer = dialogRoot(page).filter({ hasText: /bạn đang nghĩ gì|what's on your mind|tạo bài viết/i }).first();
-  if (await visible(composer, 500)) return false;
-  return true;
-}
-
-async function clickExactPublish(page) {
-  const dlg = await resolveDialog(page);
-  const btn = await firstVisible(exactPublishButtons(dlg), 2500);
-  if (btn) {
-    await safeClick(btn);
-    return true;
-  }
-  const pageLevel = await firstVisible(
-    [
-      page.getByRole("button", { name: "Đăng", exact: true }).last(),
-      page.getByRole("button", { name: "Post", exact: true }).last(),
-    ],
-    1500,
-  );
-  if (pageLevel) {
-    await safeClick(pageLevel);
-    return true;
-  }
-  return false;
-}
-
-async function clickExactNext(page) {
-  const dlg = await resolveDialog(page);
-  const btn = await firstVisible(exactNextButtons(dlg), 1000);
-  if (!btn) return false;
-  await safeClick(btn);
+  if (await visible(page.getByText("Cài đặt bài viết", { exact: true }).first(), 400)) return false;
+  if (await visible(page.getByText("Tạo bài viết", { exact: true }).first(), 400)) return false;
   return true;
 }
 
@@ -176,44 +187,41 @@ async function publishFromComposer(page, opts = {}) {
   const mark = (name, ok = true, detail = "") => {
     stages.push({ name, ok, detail });
   };
+  const fail = (code, message) => {
+    const e = err(code, message);
+    e.stages = stages;
+    return e;
+  };
 
   if (opts.hasMedia !== false) {
     const preview = await waitMediaPreview(page, 18000);
-    mark("MEDIA_PREVIEW_READY", preview, preview ? "ok" : "timeout — tiếp tục nếu caption-only");
+    mark("MEDIA_PREVIEW_READY", preview, preview ? "ok" : "timeout");
   }
 
   let stage = await detectStage(page);
-  if (stage === "COMPOSER_EDITING") {
-    if (await clickExactNext(page)) {
-      mark("NEXT_CLICKED");
-      await waitStage(page, "POST_SETTINGS", 12000);
-      stage = await detectStage(page);
-    }
-  }
+  mark("COMPOSER_STAGE", true, stage);
 
+  // Phase 1 — Tạo bài viết → Tiếp (required unless already on settings)
   if (stage !== "POST_SETTINGS") {
-    const opened = await clickExactPublish(page);
-    if (opened) {
-      mark("COMPOSER_POST_CLICKED");
-      await sleep(600);
-      await waitStage(page, "POST_SETTINGS", 12000);
-      stage = await detectStage(page);
-    }
-  }
-
-  if ((await detectStage(page)) === "POST_SETTINGS") {
+    const nextOk = await clickComposerNext(page);
+    if (!nextOk) throw fail("UI_CHANGED", "Không thấy nút Tiếp trên modal Tạo bài viết.");
+    mark("NEXT_CLICKED");
+    const moved = await waitStage(page, "POST_SETTINGS", 20000);
+    if (!moved) throw fail("UI_CHANGED", "Đã bấm Tiếp nhưng chưa thấy modal Cài đặt bài viết.");
     mark("POST_SETTINGS_OPEN");
   } else {
-    mark("POST_SETTINGS_OPEN", false, await detectStage(page));
+    mark("POST_SETTINGS_OPEN", true, "đã mở sẵn");
   }
 
   mark("PUBLISH_READY");
 
+  // Phase 2 — Cài đặt bài viết → Đăng
   const found = await clickExactPublish(page);
   if (!found) {
-    const e = err("UI_CHANGED", "Không thấy nút Đăng trong modal Cài đặt bài viết (exact «Đăng», không phải «Đăng ngay»).");
-    e.stages = stages;
-    throw e;
+    throw fail(
+      "UI_CHANGED",
+      "Không thấy nút Đăng trong modal Cài đặt bài viết (exact «Đăng», không phải «Đăng ngay»).",
+    );
   }
   mark("PUBLISH_BUTTON_FOUND");
   mark("PUBLISH_CLICKED");
@@ -230,11 +238,7 @@ async function publishFromComposer(page, opts = {}) {
   }
 
   const ok = await verifyPublished(page);
-  if (!ok) {
-    const e = err("NEEDS_VERIFICATION", "Đã bấm Đăng nhưng chưa xác nhận bài lên. Không auto-retry.");
-    e.stages = stages;
-    throw e;
-  }
+  if (!ok) throw fail("NEEDS_VERIFICATION", "Đã bấm Đăng nhưng chưa xác nhận bài lên. Không auto-retry.");
   mark("PUBLISH_SUCCESS");
   return { ok: true, stage: "PUBLISHED", stages };
 }
@@ -244,6 +248,6 @@ module.exports = {
   isExactPublishName,
   isExactNextName,
   detectStage,
-  exactPublishButtons,
+  clickExactLabel,
   resolveDialog,
 };

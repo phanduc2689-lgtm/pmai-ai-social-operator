@@ -24,6 +24,7 @@ export function sanitizeComposerBody(body: string): string {
   let s = String(body || "");
   s = s.replace(/\bBrand:\s*\{[\s\S]*?\}/gi, "");
   s = s.replace(/\{\s*"hotline"\s*:[\s\S]*?\}/g, "");
+  s = s.replace(/^\s*(Page|Brief|Brand)\s*:.*$/gim, "");
   s = s.replace(/\n{3,}/g, "\n\n").trim();
   return s;
 }
@@ -616,6 +617,10 @@ export class PmaiEngine {
           return t;
         }
       } catch (e) {
+        const staged = e && typeof e === "object" && "stages" in e ? (e as { stages?: { name: string; ok: boolean; detail?: string }[] }).stages : [];
+        for (const s of staged ?? []) {
+          this.log("publish.stage", s.ok ? "OK" : "FAIL", `${s.name}${s.detail ? ` · ${s.detail}` : ""}`, t.id);
+        }
         t.status = "NEEDS_VERIFICATION";
         t.errorCode = "NEEDS_VERIFICATION";
         a.status = "CONSUMED";
