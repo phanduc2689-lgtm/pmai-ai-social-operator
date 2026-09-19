@@ -5,6 +5,7 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import { createRequire } from "node:module";
 import net from "node:net";
 import path from "node:path";
@@ -14,6 +15,13 @@ const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PORT = 5174;
 const DEV_URL = `http://127.0.0.1:${PORT}`;
+const ELECTRON_ARGS = [
+  "--disable-gpu",
+  "--disable-gpu-compositing",
+  "--disable-gpu-sandbox",
+  "--disable-features=CalculateNativeWinOcclusion",
+  ".",
+];
 
 function mustExist(file, hint) {
   if (!fs.existsSync(file)) {
@@ -57,6 +65,32 @@ function waitPort(port, timeoutMs = 60000) {
   });
 }
 
+function waitHttp(url, timeoutMs = 45000) {
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    const tryOnce = () => {
+      const req = http.get(url, (res) => {
+        res.resume();
+        if (res.statusCode && res.statusCode < 500) {
+          resolve(undefined);
+          return;
+        }
+        retry();
+      });
+      req.on("error", retry);
+      req.setTimeout(1500, () => {
+        req.destroy();
+        retry();
+      });
+    };
+    const retry = () => {
+      if (Date.now() - start > timeoutMs) reject(new Error("Vite chua tra trang (het thoi gian cho)."));
+      else setTimeout(tryOnce, 300);
+    };
+    tryOnce();
+  });
+}
+
 function electronBinary() {
   try {
     const p = require("electron");
@@ -85,16 +119,18 @@ vite.on("exit", (code) => {
 
 try {
   await waitPort(PORT);
+  await waitHttp(DEV_URL);
 } catch (e) {
   console.error(e instanceof Error ? e.message : e);
   vite.kill();
   process.exit(1);
 }
 
+console.log("PMAI: mo Electron (tat GPU, tranh crash Windows 0xC0000005)...");
 const exe = electronBinary();
 const electron = exe
-  ? run(exe, ["."], { PMAI_RENDERER_URL: DEV_URL })
-  : run(process.execPath, [electronCli, "."], { PMAI_RENDERER_URL: DEV_URL });
+  ? run(exe, ELECTRON_ARGS, { PMAI_RENDERER_URL: DEV_URL })
+  : run(process.execPath, [electronCli, ...ELECTRON_ARGS], { PMAI_RENDERER_URL: DEV_URL });
 
 function shutdown() {
   try {
@@ -111,6 +147,12 @@ function shutdown() {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 electron.on("exit", (code) => {
+  if (code === 0) {
+    console.log("PMAI: Electron da thoat.");
+    console.log("Neu cua so khong hien: Task Manager → dong electron.exe / PMAI → npm start lai.");
+  } else {
+    console.error("PMAI: Electron thoat ma", code);
+  }
   vite.kill();
   process.exit(code ?? 0);
 });

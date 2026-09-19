@@ -4,6 +4,15 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
+// Windows GPU ACCESS_VIOLATION 0xC0000005 / -1073741819: GPU process dies,
+// ready-to-show never fires, window stays hidden. Disable GPU *before* ready.
+// Do not disable the software rasterizer — SwiftShader is the fallback painter.
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu");
+app.commandLine.appendSwitch("disable-gpu-compositing");
+app.commandLine.appendSwitch("disable-gpu-sandbox");
+app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+
 const chromeScan = require("./chrome-profiles.cjs");
 let playwrightAdapter = null;
 function adapter() {
@@ -96,16 +105,31 @@ function pickDirectory(payload) {
   return (pick && pick.directory) || "Default";
 }
 
+function forceShow(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.setSkipTaskbar(false);
+    win.moveTop();
+    win.focus();
+  } catch {
+    /* ignore */
+  }
+}
+
 function createWindow() {
   const preload = path.join(__dirname, "preload.cjs");
   const indexHtml = path.join(__dirname, "..", "dist-renderer", "index.html");
+  console.log("PMAI: tao cua so...");
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 960,
     minHeight: 640,
     title: "AI Social Operator",
-    show: false,
+    show: true,
+    backgroundColor: "#f1eee6",
     autoHideMenuBar: true,
     webPreferences: {
       preload,
@@ -113,18 +137,52 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      backgroundThrottling: false,
     },
   });
+  forceShow(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://") || url.startsWith("http://")) {
       void shell.openExternal(url);
     }
     return { action: "deny" };
   });
-  win.once("ready-to-show", () => win.show());
+  win.webContents.on("did-finish-load", () => {
+    console.log("PMAI: giao dien da tai.");
+    forceShow(win);
+  });
+  let fallbackUsed = false;
+  win.webContents.on("did-fail-load", (_e, code, desc, url, isMainFrame) => {
+    if (!isMainFrame) return;
+    if (code === -3) return;
+    console.error("PMAI: tai giao dien that bai", code, desc, url);
+    if (!fallbackUsed && fs.existsSync(indexHtml)) {
+      fallbackUsed = true;
+      console.log("PMAI: thu file dong goi", indexHtml);
+      void win.loadFile(indexHtml);
+    } else {
+      forceShow(win);
+    }
+  });
+  win.webContents.on("render-process-gone", (_e, details) => {
+    console.error("PMAI: renderer thoat", details && details.reason, details && details.exitCode);
+    if (!win.isDestroyed() && details && details.reason !== "clean-exit") {
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.reload();
+      }, 600);
+    }
+  });
+  win.on("ready-to-show", () => forceShow(win));
+  setTimeout(() => forceShow(win), 800);
+  setTimeout(() => forceShow(win), 2500);
   const devUrl = process.env.PMAI_RENDERER_URL;
-  if (devUrl) void win.loadURL(devUrl);
-  else void win.loadFile(indexHtml);
+  if (devUrl) {
+    console.log("PMAI: load", devUrl);
+    void win.loadURL(devUrl);
+  } else {
+    console.log("PMAI: load file", indexHtml);
+    void win.loadFile(indexHtml);
+  }
 }
 
 function registerIpc() {
@@ -230,12 +288,26 @@ function registerIpc() {
   }
 }
 
+process.on("uncaughtException", (e) => {
+  console.error("PMAI uncaught:", e);
+});
+process.on("unhandledRejection", (e) => {
+  console.error("PMAI rejection:", e);
+});
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  console.error("PMAI dang chay o cua so khac (hoac electron.exe zombie giu lock).");
+  console.error("Mo Task Manager → dong toan bo electron.exe / PMAI → chay lai npm start.");
   app.quit();
 } else {
   app.setName("AI-Social");
   app.setPath("userData", ensureDataDir());
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) forceShow(win);
+    else createWindow();
+  });
   app
     .whenReady()
     .then(() => {
@@ -247,9 +319,14 @@ if (!gotLock) {
       });
     })
     .catch((e) => {
-      console.error(e);
+      console.error("PMAI whenReady loi:", e);
     });
   app.on("window-all-closed", () => {
     app.quit();
+  });
+  app.on("child-process-gone", (_e, details) => {
+    if (details && details.type === "GPU") {
+      console.error("PMAI: GPU process thoat", details.reason, details.exitCode, "- cua so van mo bang software render.");
+    }
   });
 }
