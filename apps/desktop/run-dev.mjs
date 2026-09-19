@@ -113,7 +113,10 @@ const mainCjs = mustExist(path.join(root, "apps", "desktop", "dist-main", "main.
 console.log("PMAI Electron — thu muc:", root);
 console.log("PMAI boot gpu-swiftshader");
 if (!fs.readFileSync(mainCjs, "utf8").includes("disableHardwareAcceleration")) {
-  console.error("BAN MAIN.CJS CU — cua so se khong hien. Chay git pull roi mo lai.");
+  console.error("BAN MAIN.CJS CU — cua so se khong hien. Tai lai repo tu GitHub (khong dung ZIP cu).");
+}
+if (!fs.existsSync(path.join(root, ".git"))) {
+  console.error("Thu muc nay khong co .git — co the la ZIP cu. Tai: https://github.com/phanduc2689-lgtm/pmai-ai-social-operator");
 }
 
 const vite = run(process.execPath, [viteJs, "--config", viteConfig, "--host", "127.0.0.1", "--port", String(PORT)], {

@@ -2,6 +2,8 @@
 
 const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const fs = require("node:fs");
+const http = require("node:http");
+const crypto = require("node:crypto");
 const path = require("node:path");
 
 // Windows GPU ACCESS_VIOLATION 0xC0000005 / -1073741819.
@@ -57,6 +59,8 @@ const ALLOWLIST = [
 ];
 
 const registered = new Set();
+const handlers = new Map();
+const bridge = { port: 0, token: "", keepAlive: false };
 
 function dataRoot() {
   return path.join(app.getPath("appData"), "AI-Social");
@@ -89,12 +93,120 @@ function wrap(fn) {
 function handleOnce(channel, fn) {
   if (registered.has(channel)) return;
   registered.add(channel);
+  handlers.set(channel, fn);
   try {
     ipcMain.removeHandler(channel);
   } catch {
     /* ignore */
   }
   ipcMain.handle(channel, fn);
+}
+
+async function dispatchInvoke(channel, payload) {
+  const fn = handlers.get(channel);
+  if (!fn) {
+    return { ok: false, error: { code: "NOT_READY", message: `Kenh ${channel} khong co.` } };
+  }
+  return fn({}, payload);
+}
+
+function startBridge() {
+  bridge.token = crypto.randomBytes(16).toString("hex");
+  const server = http.createServer(async (req, res) => {
+    const origin = String(req.headers.origin || "");
+    if (origin.startsWith("http://127.0.0.1:") || origin.startsWith("http://localhost:")) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:5174");
+    }
+    res.setHeader("Access-Control-Allow-Headers", "content-type, x-pmai-token");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    const urlPath = String(req.url || "").split("?")[0];
+    if (req.method === "GET" && (urlPath === "/" || urlPath === "/pmai/health")) {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      res.end("PMAI host ok");
+      return;
+    }
+    if (req.method !== "POST" || urlPath !== "/pmai/invoke") {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    if (req.headers["x-pmai-token"] !== bridge.token) {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: { code: "NOT_READY", message: "token sai" } }));
+      return;
+    }
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    let body = {};
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    } catch {
+      body = {};
+    }
+    try {
+      const result = await dispatchInvoke(body.channel, body.payload);
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(result));
+    } catch (e) {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          error: {
+            code: e && e.code ? e.code : "NOT_READY",
+            message: e instanceof Error ? e.message : String(e),
+          },
+        }),
+      );
+    }
+  });
+  return new Promise((resolve, reject) => {
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      bridge.port = addr && typeof addr === "object" ? addr.port : 0;
+      console.log("PMAI host IPC 127.0.0.1:" + bridge.port);
+      resolve(bridge);
+    });
+  });
+}
+
+function rendererUrl() {
+  const dev = process.env.PMAI_RENDERER_URL || "http://127.0.0.1:5174";
+  const u = new URL(dev.includes("://") ? dev : `http://127.0.0.1:5174`);
+  if (bridge.port) u.searchParams.set("pmaiPort", String(bridge.port));
+  if (bridge.token) u.searchParams.set("pmaiToken", bridge.token);
+  return u.toString();
+}
+
+async function openBrowserFallback() {
+  bridge.keepAlive = true;
+  const url = rendererUrl();
+  console.log("PMAI: GPU Windows khong ve cua so Electron. Mo trinh duyet...");
+  try {
+    await shell.openExternal(url);
+  } catch (e) {
+    console.error("PMAI: khong mo duoc trinh duyet", e);
+    console.error("Mo thu cong:", url.replace(bridge.token, "***"));
+  }
+  try {
+    await dialog.showMessageBox({
+      type: "info",
+      title: "PMAI",
+      message: "Cua so Electron bi GPU Windows chan. PMAI da mo tren trinh duyet.",
+      detail: "Giu cua so terminal (npm start) mo. Khong dong no khi dang dang bai.",
+      buttons: ["OK"],
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 function pickDirectory(payload) {
@@ -188,8 +300,9 @@ function createWindow() {
     return true;
   };
   if (devUrl) {
-    console.log("PMAI: load", devUrl);
-    void win.loadURL(devUrl);
+    const url = rendererUrl();
+    console.log("PMAI: load", url.replace(bridge.token, "***"));
+    void win.loadURL(url);
     setTimeout(() => {
       if (win.isDestroyed() || fallbackUsed) return;
       win.webContents
@@ -341,10 +454,29 @@ if (!gotLock) {
   });
   app
     .whenReady()
-    .then(() => {
+    .then(async () => {
       ensureDataDir();
       registerIpc();
+      await startBridge();
       createWindow();
+      setTimeout(async () => {
+        const win = BrowserWindow.getAllWindows()[0];
+        let painted = false;
+        if (win && !win.isDestroyed()) {
+          try {
+            painted = await win.webContents.executeJavaScript(
+              "!!(document.body && document.body.innerText && document.body.innerText.length > 8)",
+            );
+          } catch {
+            painted = false;
+          }
+        }
+        if (!painted) {
+          await openBrowserFallback();
+        } else {
+          console.log("PMAI: cua so Electron ve OK.");
+        }
+      }, 3500);
       app.on("activate", () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
       });
@@ -353,11 +485,10 @@ if (!gotLock) {
       console.error("PMAI whenReady loi:", e);
     });
   app.on("window-all-closed", () => {
-    app.quit();
-  });
-  app.on("child-process-gone", (_e, details) => {
-    if (details && details.type === "GPU") {
-      console.error("PMAI: GPU process thoat", details.reason, details.exitCode, "- cua so van mo bang software render.");
+    if (bridge.keepAlive) {
+      console.log("PMAI host van chay cho trinh duyet. Ctrl+C de thoat.");
+      return;
     }
+    app.quit();
   });
 }
