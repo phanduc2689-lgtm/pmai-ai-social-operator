@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
 import { BookOpen, FileText, LayoutDashboard, ListTodo, Settings, Shield, Users } from "lucide-react";
 import { FirstRun } from "@/components/pmai-first-run.tsx";
 import { PmaiLogo } from "@/components/pmai-logo.tsx";
@@ -65,6 +65,48 @@ function ChromeLiveBar() {
   return <p className={`pmai-live ${ok ? "is-ok" : "is-warn"}`}>{line}</p>;
 }
 
+class BootErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(error, info.componentStack);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="pmai-shell" style={{ alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ maxWidth: 480 }}>
+            <PmaiLogo />
+            <p className="pmai-hint" style={{ marginTop: 16 }}>
+              PMAI gặp lỗi khi mở. Đóng hẳn app, chạy lại npm start. Nếu vẫn trắng màn hình: xóa dữ liệu local của app (không xóa Chrome).
+            </p>
+            <pre style={{ marginTop: 12, whiteSpace: "pre-wrap", fontSize: 12, color: "var(--color-danger)" }}>{this.state.error.message}</pre>
+            <button
+              type="button"
+              className="pmai-nav-btn is-on"
+              style={{ marginTop: 16, width: "auto", padding: "0 16px" }}
+              onClick={() => {
+                try {
+                  localStorage.removeItem("pmai.store.v2");
+                  localStorage.removeItem("pmai.store.v1");
+                } catch {
+                  /* ignore */
+                }
+                window.location.reload();
+              }}
+            >
+              Xóa workspace local và mở lại
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function PmaiApp() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -78,7 +120,11 @@ export function PmaiApp() {
       </div>
     );
   }
-  return <PmaiShell />;
+  return (
+    <BootErrorBoundary>
+      <PmaiShell />
+    </BootErrorBoundary>
+  );
 }
 
 function PmaiShell() {

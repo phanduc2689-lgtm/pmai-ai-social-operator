@@ -7,7 +7,6 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const store = require("./chrome-profiles.cjs");
 const media = require("./media-upload.cjs");
-const fbPublish = require("./facebook-publish.cjs");
 
 const DEFAULT_CDP_PORT = 9222;
 
@@ -325,6 +324,7 @@ async function clickNamed(name) {
 async function publishPost() {
   if (!live.page) throw err("NOT_READY", "Browser chưa launch");
   await ensureComposerOpen();
+  const fbPublish = require("./facebook-publish.cjs");
   return fbPublish.publishFromComposer(live.page, { hasMedia: true });
 }
 

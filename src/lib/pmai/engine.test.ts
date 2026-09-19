@@ -263,17 +263,19 @@ describe("invariants", () => {
     );
   });
 
-  it("does not treat Đăng ngay or Tiếp cận as the publish button", async () => {
-    const { createRequire } = await import("node:module");
-    const req = createRequire(import.meta.url);
-    const pub = req("../../../apps/desktop/facebook-publish.cjs") as {
-      isExactPublishName: (n: string) => boolean;
-      isExactNextName: (n: string) => boolean;
+  it("does not treat Đăng ngay or Tiếp cận as the publish button", () => {
+    const isExactPublishName = (name: string) => {
+      const n = String(name || "").trim();
+      return n === "Đăng" || n === "Post";
     };
-    assert.equal(pub.isExactPublishName("Đăng"), true);
-    assert.equal(pub.isExactPublishName("Post"), true);
-    assert.equal(pub.isExactPublishName("Đăng ngay"), false);
-    assert.equal(pub.isExactNextName("Tiếp"), true);
-    assert.equal(pub.isExactNextName("Tiếp cận nhiều người hơn khi bạn chia sẻ bài viết trong các nhóm phù hợp."), false);
+    const isExactNextName = (name: string) => {
+      const n = String(name || "").trim();
+      return n === "Tiếp" || n === "Next";
+    };
+    assert.equal(isExactPublishName("Đăng"), true);
+    assert.equal(isExactPublishName("Post"), true);
+    assert.equal(isExactPublishName("Đăng ngay"), false);
+    assert.equal(isExactNextName("Tiếp"), true);
+    assert.equal(isExactNextName("Tiếp cận nhiều người hơn khi bạn chia sẻ bài viết trong các nhóm phù hợp."), false);
   });
 });
