@@ -30,15 +30,10 @@ function defaultChromeExecutable(env = process.env, platform = process.platform)
   return candidates.find((p) => p && fs.existsSync(p)) || null;
 }
 
-function pmaiRoot(env = process.env, platform = process.platform) {
-  if (platform === "win32") {
-    const local = env.LOCALAPPDATA || path.join(env.USERPROFILE || "C:\\Users\\Default", "AppData", "Local");
-    return path.join(local, "PMAI");
-  }
-  if (platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "PMAI");
-  }
-  return path.join(os.homedir(), ".local", "share", "pmai");
+/** Profiles live next to the repo (F: project folder), not %LOCALAPPDATA%. */
+function pmaiRoot() {
+  if (process.env.PMAI_ROOT) return process.env.PMAI_ROOT;
+  return path.join(__dirname, "..", "..", ".pmai");
 }
 
 function profilesRoot() {
@@ -105,8 +100,9 @@ function hydrate(row) {
 
 function listPmaiProfiles() {
   fs.mkdirSync(profilesRoot(), { recursive: true });
-  const rows = readRegistry();
-  return rows.map(hydrate).sort((a, b) => Number(b.facebookLikely) - Number(a.facebookLikely) || String(b.lastUsedAt || "").localeCompare(String(a.lastUsedAt || "")));
+  return readRegistry()
+    .map(hydrate)
+    .sort((a, b) => Number(b.facebookLikely) - Number(a.facebookLikely) || String(b.lastUsedAt || "").localeCompare(String(a.lastUsedAt || "")));
 }
 
 function getProfile(id) {
@@ -119,7 +115,7 @@ function createPmaiProfile(displayName) {
   fs.mkdirSync(path.join(userDataDir, "Default"), { recursive: true });
   const row = {
     id,
-    displayName: String(displayName || "Hồ sơ PMAI").trim() || "Hồ sơ PMAI",
+    displayName: String(displayName || "H\u1ed3 s\u01a1 PMAI").trim() || "H\u1ed3 s\u01a1 PMAI",
     userDataDir,
     createdAt: new Date().toISOString(),
     lastUsedAt: null,
@@ -132,27 +128,21 @@ function createPmaiProfile(displayName) {
   return hydrate(row);
 }
 
-const SKIP_COPY = new Set([
-  "SingletonLock",
-  "SingletonSocket",
-  "SingletonCookie",
-  "lockfile",
-  "DevToolsActivePort",
-]);
+const SKIP_COPY = new Set(["SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile", "DevToolsActivePort"]);
 
 function clonePmaiProfile(sourceId, displayName) {
   const src = getProfile(sourceId);
   if (!src) {
-    const e = new Error("Không thấy hồ sơ nguồn để copy session.");
+    const e = new Error("Kh\u00f4ng th\u1ea5y h\u1ed3 s\u01a1 ngu\u1ed3n \u0111\u1ec3 copy session.");
     e.code = "NOT_READY";
     throw e;
   }
   if (src.locked) {
-    const e = new Error("Hồ sơ nguồn đang mở. Đóng cửa sổ Chrome của hồ sơ đó rồi copy session.");
+    const e = new Error("H\u1ed3 s\u01a1 ngu\u1ed3n \u0111ang m\u1edf. \u0110\u00f3ng c\u1eeda s\u1ed5 Chrome r\u1ed3i copy session.");
     e.code = "IDLE_BLOCKED";
     throw e;
   }
-  const created = createPmaiProfile(displayName || `${src.displayName} (bản sao)`);
+  const created = createPmaiProfile(displayName || `${src.displayName} (b\u1ea3n sao)`);
   try {
     fs.cpSync(src.userDataDir, created.userDataDir, {
       recursive: true,
@@ -163,15 +153,12 @@ function clonePmaiProfile(sourceId, displayName) {
     e.code = "NOT_READY";
     throw e;
   }
-  const all = readRegistry().map((r) => (r.id === created.id ? { ...r, clonedFrom: src.id } : r));
-  writeRegistry(all);
+  writeRegistry(readRegistry().map((r) => (r.id === created.id ? { ...r, clonedFrom: src.id } : r)));
   return getProfile(created.id);
 }
 
 function touchProfile(id, patch = {}) {
-  const all = readRegistry();
-  const next = all.map((r) => (r.id === id ? { ...r, ...patch, lastUsedAt: new Date().toISOString() } : r));
-  writeRegistry(next);
+  writeRegistry(readRegistry().map((r) => (r.id === id ? { ...r, ...patch, lastUsedAt: new Date().toISOString() } : r)));
   return getProfile(id);
 }
 
