@@ -3,7 +3,7 @@ node_modules
 .vercel
 .nitro
 .tanstack
-release
+.release
 apps/desktop/pack
 apps/desktop/dist-renderer
 *.exe
@@ -16,3 +16,4 @@ artifacts
 public/downloads/*.part*
 *.log
 .DS_Store
+.pmai/
