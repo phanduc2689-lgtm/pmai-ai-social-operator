@@ -76,6 +76,7 @@ function wrap(fn) {
         error: {
           code: e && e.code ? e.code : "NOT_READY",
           message: e instanceof Error ? e.message : String(e),
+          ...(e && e.stages ? { stages: e.stages } : {}),
         },
       };
     }

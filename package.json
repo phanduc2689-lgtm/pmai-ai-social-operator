@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite --config apps/desktop/vite.config.ts --host 127.0.0.1 --port 5174",
     "start": "node apps/desktop/run-dev.mjs",
-    "test": "node --experimental-strip-types --test src/lib/pmai/engine.test.ts src/lib/pmai/chrome-profiles.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/pmai/engine.test.ts src/lib/pmai/chrome-profiles.test.ts apps/desktop/facebook-publish.test.cjs",
     "typecheck": "tsc --noEmit",
     "electron:dev": "node apps/desktop/run-dev.mjs"
   },

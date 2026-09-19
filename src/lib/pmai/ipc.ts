@@ -1,7 +1,7 @@
 export interface HostResult<T> {
   ok: boolean;
   data?: T;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; stages?: { name: string; ok: boolean; detail?: string }[] };
 }
 
 type PmaiBridge = { invoke: (channel: string, payload?: unknown) => Promise<HostResult<unknown>> };

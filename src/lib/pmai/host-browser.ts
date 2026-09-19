@@ -15,7 +15,11 @@ export class HostBrowserAdapter implements BrowserAdapter {
   private async call<T>(channel: string, payload?: unknown): Promise<T> {
     const r = await hostInvoke<T>(channel, payload);
     if (!r.ok) {
-      throw new PmaiError((r.error?.code as never) || "NOT_READY", r.error?.message || "Chrome IPC lỗi");
+      const err = new PmaiError((r.error?.code as never) || "NOT_READY", r.error?.message || "Chrome IPC lỗi");
+      if (Array.isArray(r.error?.stages)) {
+        Object.assign(err, { stages: r.error.stages });
+      }
+      throw err;
     }
     return r.data as T;
   }

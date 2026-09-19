@@ -264,17 +264,23 @@ describe("invariants", () => {
   });
 
   it("does not treat Đăng ngay or Tiếp cận as the publish button", () => {
+    const normalizeLabel = (name: string) =>
+      String(name || "")
+        .replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
     const isExactPublishName = (name: string) => {
-      const n = String(name || "").trim();
+      const n = normalizeLabel(name);
       return n === "Đăng" || n === "Post";
     };
     const isExactNextName = (name: string) => {
-      const n = String(name || "").trim();
+      const n = normalizeLabel(name);
       return n === "Tiếp" || n === "Next";
     };
     assert.equal(isExactPublishName("Đăng"), true);
     assert.equal(isExactPublishName("Post"), true);
     assert.equal(isExactPublishName("Đăng ngay"), false);
+    assert.equal(isExactPublishName("Đăng\u00a0"), true);
     assert.equal(isExactNextName("Tiếp"), true);
     assert.equal(isExactNextName("Tiếp cận nhiều người hơn khi bạn chia sẻ bài viết trong các nhóm phù hợp."), false);
   });
