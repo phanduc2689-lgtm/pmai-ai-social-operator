@@ -48,5 +48,9 @@ echo App se tu chon ho so da login Facebook va ket noi CDP 9222.
 echo.
 pause
 
+echo Dong electron.exe cu (tranh cua so an)...
+taskkill /F /IM electron.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+
 call npm start
 if errorlevel 1 pause

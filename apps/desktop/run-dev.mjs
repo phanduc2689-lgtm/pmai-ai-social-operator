@@ -19,7 +19,9 @@ const ELECTRON_ARGS = [
   "--disable-gpu",
   "--disable-gpu-compositing",
   "--disable-gpu-sandbox",
-  "--disable-features=CalculateNativeWinOcclusion",
+  "--disable-direct-composition",
+  "--disable-features=CalculateNativeWinOcclusion,HardwareMediaKeyHandling",
+  "--use-angle=swiftshader",
   ".",
 ];
 
@@ -106,10 +108,17 @@ const viteJs = mustExist(path.join(root, "node_modules", "vite", "bin", "vite.js
 const viteConfig = mustExist(path.join(root, "apps", "desktop", "vite.config.ts"));
 const electronCli = path.join(root, "node_modules", "electron", "cli.js");
 mustExist(electronCli, "Chay: npm install");
+const mainCjs = mustExist(path.join(root, "apps", "desktop", "dist-main", "main.cjs"));
 
 console.log("PMAI Electron — thu muc:", root);
+console.log("PMAI boot gpu-swiftshader");
+if (!fs.readFileSync(mainCjs, "utf8").includes("disableHardwareAcceleration")) {
+  console.error("BAN MAIN.CJS CU — cua so se khong hien. Chay git pull roi mo lai.");
+}
 
-const vite = run(process.execPath, [viteJs, "--config", viteConfig, "--host", "127.0.0.1", "--port", String(PORT)]);
+const vite = run(process.execPath, [viteJs, "--config", viteConfig, "--host", "127.0.0.1", "--port", String(PORT)], {
+  VITE_CONFIG_NATIVE_IGNORE_WARNING: "true",
+});
 vite.on("exit", (code) => {
   if (code) {
     console.error("Vite thoat ma", code);
@@ -129,8 +138,11 @@ try {
 console.log("PMAI: mo Electron (tat GPU, tranh crash Windows 0xC0000005)...");
 const exe = electronBinary();
 const electron = exe
-  ? run(exe, ELECTRON_ARGS, { PMAI_RENDERER_URL: DEV_URL })
-  : run(process.execPath, [electronCli, ...ELECTRON_ARGS], { PMAI_RENDERER_URL: DEV_URL });
+  ? run(exe, ELECTRON_ARGS, { PMAI_RENDERER_URL: DEV_URL, VITE_CONFIG_NATIVE_IGNORE_WARNING: "true" })
+  : run(process.execPath, [electronCli, ...ELECTRON_ARGS], {
+      PMAI_RENDERER_URL: DEV_URL,
+      VITE_CONFIG_NATIVE_IGNORE_WARNING: "true",
+    });
 
 function shutdown() {
   try {

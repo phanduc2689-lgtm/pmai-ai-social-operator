@@ -4,14 +4,17 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
-// Windows GPU ACCESS_VIOLATION 0xC0000005 / -1073741819: GPU process dies,
-// ready-to-show never fires, window stays hidden. Disable GPU *before* ready.
-// Do not disable the software rasterizer — SwiftShader is the fallback painter.
+// Windows GPU ACCESS_VIOLATION 0xC0000005 / -1073741819.
+// Must run before app.ready. SwiftShader paints if the hardware GPU dies.
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
 app.commandLine.appendSwitch("disable-gpu-compositing");
 app.commandLine.appendSwitch("disable-gpu-sandbox");
-app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+app.commandLine.appendSwitch("disable-direct-composition");
+app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion,HardwareMediaKeyHandling");
+app.commandLine.appendSwitch("use-angle", "swiftshader");
+app.commandLine.appendSwitch("use-gl", "angle");
+console.log("PMAI boot gpu-swiftshader");
 
 const chromeScan = require("./chrome-profiles.cjs");
 let playwrightAdapter = null;
@@ -174,15 +177,38 @@ function createWindow() {
     }
   });
   win.on("ready-to-show", () => forceShow(win));
-  setTimeout(() => forceShow(win), 800);
-  setTimeout(() => forceShow(win), 2500);
+  setTimeout(() => forceShow(win), 400);
+  setTimeout(() => forceShow(win), 1500);
+  setTimeout(() => forceShow(win), 4000);
   const devUrl = process.env.PMAI_RENDERER_URL;
+  const loadPackaged = () => {
+    if (!fs.existsSync(indexHtml)) return false;
+    console.log("PMAI: load file", indexHtml);
+    void win.loadFile(indexHtml);
+    return true;
+  };
   if (devUrl) {
     console.log("PMAI: load", devUrl);
     void win.loadURL(devUrl);
-  } else {
-    console.log("PMAI: load file", indexHtml);
-    void win.loadFile(indexHtml);
+    setTimeout(() => {
+      if (win.isDestroyed() || fallbackUsed) return;
+      win.webContents
+        .executeJavaScript("document.body && document.body.innerText.length > 0")
+        .then((ok) => {
+          if (!ok && !fallbackUsed) {
+            fallbackUsed = true;
+            loadPackaged();
+          }
+        })
+        .catch(() => {
+          if (!fallbackUsed) {
+            fallbackUsed = true;
+            loadPackaged();
+          }
+        });
+    }, 5000);
+  } else if (!loadPackaged()) {
+    console.error("PMAI: khong co dist-renderer/index.html");
   }
 }
 
@@ -308,6 +334,10 @@ if (!gotLock) {
     const win = BrowserWindow.getAllWindows()[0];
     if (win) forceShow(win);
     else createWindow();
+  });
+  app.on("child-process-gone", (_e, details) => {
+    console.error("PMAI: process thoat", details && details.type, details && details.reason, details && details.exitCode);
+    forceShow(BrowserWindow.getAllWindows()[0]);
   });
   app
     .whenReady()
