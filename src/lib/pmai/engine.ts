@@ -20,6 +20,14 @@ import type {
   WorkspaceState,
 } from "./types.ts";
 
+export function sanitizeComposerBody(body: string): string {
+  let s = String(body || "");
+  s = s.replace(/\bBrand:\s*\{[\s\S]*?\}/gi, "");
+  s = s.replace(/\{\s*"hotline"\s*:[\s\S]*?\}/g, "");
+  s = s.replace(/\n{3,}/g, "\n\n").trim();
+  return s;
+}
+
 const STORAGE_KEY = "pmai.store.v2";
 
 export interface EngineDeps {
@@ -306,6 +314,8 @@ export class PmaiEngine {
       user: `Brand: ${JSON.stringify(this.state.brandFacts)}\nPage: ${page.name}\nBrief: ${brief}`,
     });
     let body = raw.body?.trim() ? raw.body : `Bản nháp cho: ${brief}`;
+    body = sanitizeComposerBody(body);
+    if (!body) body = `Bản nháp cho: ${brief}`;
     const footer = this.defaultFooter();
     if (this.state.appendFooter && footer && !body.includes(footer)) {
       body = `${body.trim()}\n\n${footer}`;
@@ -570,16 +580,19 @@ export class PmaiEngine {
       }
 
       await adapter.click({ name: "composer" });
-      await adapter.type({ role: "textbox", name: "composer" }, c.body);
+      const caption = sanitizeComposerBody(c.body) || c.body;
+      this.log("publish.stage", "OK", "CONTENT_READY", t.id);
+      await adapter.type({ role: "textbox", name: "composer" }, caption);
       const files = uploadPaths(c.media, requirePath);
       if (files.length) {
         this.log("media.upload", "RUNNING", files.map((f) => f.split(/[/\\]/).pop()).join(", "), t.id);
         await adapter.upload(files);
         this.log("media.upload", "OK", String(files.length), t.id);
+        this.log("publish.stage", "OK", "MEDIA_UPLOADED", t.id);
       }
 
       const preview = await adapter.observe();
-      if (adapter instanceof FakeBrowserAdapter && !adapter.previewValid({ body: c.body, pageUrl: page.url })) {
+      if (adapter instanceof FakeBrowserAdapter && !adapter.previewValid({ body: caption, pageUrl: page.url })) {
         throw new PmaiError("PREVIEW_MISMATCH", "Preview không khớp bản đã duyệt.");
       }
       const previewUrlOk = urlsLooselyMatch(preview.url, page.url);
@@ -588,8 +601,20 @@ export class PmaiEngine {
         throw new PmaiError("PREVIEW_MISMATCH", "Preview sai trang.");
       }
 
+      this.log("publish.stage", "RUNNING", "PUBLISH_READY", t.id);
       try {
-        await adapter.click({ name: "Đăng" });
+        const published = await adapter.publish();
+        for (const s of published.stages ?? []) {
+          this.log("publish.stage", s.ok ? "OK" : "FAIL", `${s.name}${s.detail ? ` · ${s.detail}` : ""}`, t.id);
+        }
+        if (!published.ok) {
+          t.status = "NEEDS_VERIFICATION";
+          t.errorCode = "NEEDS_VERIFICATION";
+          a.status = "CONSUMED";
+          this.log("task.needs_verification", "NEEDS_VERIFICATION", published.stage, t.id);
+          this.persist();
+          return t;
+        }
       } catch (e) {
         t.status = "NEEDS_VERIFICATION";
         t.errorCode = "NEEDS_VERIFICATION";

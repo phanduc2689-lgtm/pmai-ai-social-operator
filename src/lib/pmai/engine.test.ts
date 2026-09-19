@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { FakeBrowserAdapter, hasComposerSideEffect } from "./browser.ts";
-import { PmaiEngine, namesLooselyMatch, urlsLooselyMatch } from "./engine.ts";
+import { PmaiEngine, namesLooselyMatch, sanitizeComposerBody, urlsLooselyMatch } from "./engine.ts";
 import { PmaiError } from "./errors.ts";
 import { contentRevisionHash } from "./hash.ts";
 import { looksLikeMediaId, resolveMediaSource, uploadPaths } from "./media.ts";
@@ -78,6 +78,7 @@ describe("invariants", () => {
     assert.equal(done.status, "SUCCESS");
     assert.ok(done.permalink);
     assert.ok(browser.calls.some((c) => c.method === "type"));
+    assert.ok(browser.calls.some((c) => c.method === "publish"));
   });
 
   it("edit after approve invalidates", async () => {
@@ -250,5 +251,25 @@ describe("invariants", () => {
         ),
       PmaiError,
     );
+  });
+
+  it("strips Brand JSON leaked into caption", () => {
+    const raw = 'Khám phá cùng PMAI.\n\nBrand: {"hotline":"","pageName":"","priceNote":"","policyNote":""}';
+    assert.equal(sanitizeComposerBody(raw), "Khám phá cùng PMAI.");
+    assert.equal(sanitizeComposerBody('{"hotline":"","pageName":"x","priceNote":"","policyNote":""}'), "");
+  });
+
+  it("does not treat Đăng ngay or Tiếp cận as the publish button", async () => {
+    const { createRequire } = await import("node:module");
+    const req = createRequire(import.meta.url);
+    const pub = req("../../../apps/desktop/facebook-publish.cjs") as {
+      isExactPublishName: (n: string) => boolean;
+      isExactNextName: (n: string) => boolean;
+    };
+    assert.equal(pub.isExactPublishName("Đăng"), true);
+    assert.equal(pub.isExactPublishName("Post"), true);
+    assert.equal(pub.isExactPublishName("Đăng ngay"), false);
+    assert.equal(pub.isExactNextName("Tiếp"), true);
+    assert.equal(pub.isExactNextName("Tiếp cận nhiều người hơn khi bạn chia sẻ bài viết trong các nhóm phù hợp."), false);
   });
 });

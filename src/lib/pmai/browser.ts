@@ -12,6 +12,19 @@ export interface BrowserCall {
   args: unknown[];
 }
 
+export interface PublishStage {
+  name: string;
+  ok: boolean;
+  detail?: string;
+}
+
+export interface PublishResult {
+  ok: boolean;
+  stage: string;
+  stages?: PublishStage[];
+  permalink?: string | null;
+}
+
 export interface BrowserAdapter {
   readonly kind: string;
   capabilities(): {
@@ -26,6 +39,7 @@ export interface BrowserAdapter {
   type(target: SemanticTarget, text: string): Promise<void>;
   upload(files: string[]): Promise<void>;
   click(target: SemanticTarget): Promise<void>;
+  publish(): Promise<PublishResult>;
   screenshot(): Promise<string>;
   close(): Promise<void>;
   calls: BrowserCall[];
@@ -102,6 +116,25 @@ export class FakeBrowserAdapter implements BrowserAdapter {
     }
   }
 
+  async publish(): Promise<PublishResult> {
+    this.calls.push({ method: "publish", args: [] });
+    if (this.opts.crashAfterClickPublish) {
+      throw Object.assign(new Error("disconnected"), { code: "BROWSER_CRASH" });
+    }
+    this.composerOpen = false;
+    return {
+      ok: true,
+      stage: "PUBLISHED",
+      stages: [
+        { name: "CONTENT_READY", ok: true },
+        { name: "POST_SETTINGS_OPEN", ok: true },
+        { name: "PUBLISH_BUTTON_FOUND", ok: true },
+        { name: "PUBLISH_CLICKED", ok: true },
+        { name: "PUBLISH_SUCCESS", ok: true },
+      ],
+    };
+  }
+
   async screenshot() {
     this.calls.push({ method: "screenshot", args: [] });
     return "data:image/png;base64,fake";
@@ -121,5 +154,11 @@ export class FakeBrowserAdapter implements BrowserAdapter {
 }
 
 export function hasComposerSideEffect(calls: BrowserCall[]): boolean {
-  return calls.some((c) => c.method === "type" || c.method === "upload" || (c.method === "click" && /đăng|publish/i.test(JSON.stringify(c.args))));
+  return calls.some(
+    (c) =>
+      c.method === "type" ||
+      c.method === "upload" ||
+      c.method === "publish" ||
+      (c.method === "click" && /đăng|publish/i.test(JSON.stringify(c.args))),
+  );
 }

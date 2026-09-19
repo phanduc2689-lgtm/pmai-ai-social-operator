@@ -14,6 +14,7 @@ const ALLOWLIST = [
   "chrome.type",
   "chrome.upload",
   "chrome.click",
+  "chrome.publish",
   "chrome.screenshot",
   "chrome.close",
   "chrome.pickImages",

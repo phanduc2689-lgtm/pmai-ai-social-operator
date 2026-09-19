@@ -1,4 +1,4 @@
-import type { BrowserAdapter, BrowserCall, Observation, SemanticTarget } from "./browser.ts";
+import type { BrowserAdapter, BrowserCall, Observation, PublishResult, SemanticTarget } from "./browser.ts";
 import { PmaiError } from "./errors.ts";
 import { hostInvoke } from "./ipc.ts";
 import { looksLikeMediaId } from "./media.ts";
@@ -47,6 +47,10 @@ export class HostBrowserAdapter implements BrowserAdapter {
   async click(target: SemanticTarget) {
     this.calls.push({ method: "click", args: [target] });
     await this.call("chrome.click", { name: target.name });
+  }
+  async publish() {
+    this.calls.push({ method: "publish", args: [] });
+    return this.call<PublishResult>("chrome.publish");
   }
   async screenshot() {
     this.calls.push({ method: "screenshot", args: [] });

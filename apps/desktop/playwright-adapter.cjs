@@ -7,6 +7,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const store = require("./chrome-profiles.cjs");
 const media = require("./media-upload.cjs");
+const fbPublish = require("./facebook-publish.cjs");
 
 const DEFAULT_CDP_PORT = 9222;
 
@@ -313,20 +314,18 @@ async function clickNamed(name) {
     await ensureComposerOpen();
     return;
   }
-  if (/^(đăng|post|publish)$/i.test(n) || /đăng|publish/i.test(n)) {
-    const nxt = await firstVisible(nextButtons(live.page), 1500);
-    if (nxt) {
-      await safeClick(nxt);
-      await new Promise((r) => setTimeout(r, 700));
-    }
-    const btn = await firstVisible(publishButtons(live.page), 2500);
-    if (!btn) throw err("UI_CHANGED", "Không thấy nút Đăng / Tiếp.");
-    await safeClick(btn);
-    return;
+  if (n === "Đăng" || n === "đăng" || /^(post|publish)$/i.test(n) || /publish/i.test(n)) {
+    return publishPost();
   }
   const btn = await firstVisible(genericLocators(live.page, n), 2000);
   if (!btn) throw err("UI_CHANGED", `Không thấy nút «${name}».`);
   await safeClick(btn);
+}
+
+async function publishPost() {
+  if (!live.page) throw err("NOT_READY", "Browser chưa launch");
+  await ensureComposerOpen();
+  return fbPublish.publishFromComposer(live.page, { hasMedia: true });
 }
 
 async function screenshotPng() {
@@ -362,6 +361,7 @@ module.exports = {
   typeText,
   uploadFiles,
   clickNamed,
+  publishPost,
   screenshotPng,
   closeBrowser,
   isCdpUp,

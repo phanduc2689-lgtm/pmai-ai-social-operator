@@ -26,6 +26,7 @@ const ALLOWLIST = [
   "chrome.type",
   "chrome.upload",
   "chrome.click",
+  "chrome.publish",
   "chrome.screenshot",
   "chrome.close",
   "workspace.get",
@@ -212,6 +213,13 @@ function registerIpc() {
     }),
   );
   handleOnce("chrome.click", wrap(async (payload) => adapter().clickNamed(payload.name)));
+  handleOnce(
+    "chrome.publish",
+    wrap(async () => {
+      if (typeof adapter().publishPost === "function") return adapter().publishPost();
+      return adapter().clickNamed("Đăng");
+    }),
+  );
   handleOnce("chrome.screenshot", wrap(async () => adapter().screenshotPng()));
   handleOnce("chrome.close", wrap(async () => adapter().closeBrowser()));
   for (const ch of ALLOWLIST) {
