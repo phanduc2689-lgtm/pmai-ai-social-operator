@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const store = require("./chrome-profiles.cjs");
+const media = require("./media-upload.cjs");
 
 const DEFAULT_CDP_PORT = 9222;
 
@@ -28,12 +29,6 @@ function anyDialog(page) {
   return page.locator('[role="dialog"], [aria-modal="true"]');
 }
 
-function postDialog(page) {
-  const all = anyDialog(page);
-  const named = all.filter({ hasText: /đăng|tạo bài|create post|bạn đang nghĩ gì|what.?s on your mind/i });
-  return named.or(all).last();
-}
-
 function composerOpeners(page) {
   return [
     page.getByRole("button", { name: /tạo bài viết|create a post|viết bài/i }).first(),
@@ -50,7 +45,6 @@ function composerTargets(page) {
     dlg.locator('[role="textbox"]').first(),
     dlg.locator('[data-lexical-editor="true"]').first(),
     page.locator('[role="dialog"] [contenteditable="true"]').first(),
-    page.locator('[role="dialog"] [data-lexical-editor="true"]').first(),
     page.getByText(/bạn đang nghĩ gì|what.?s on your mind/i).last(),
   ];
 }
@@ -280,14 +274,20 @@ async function goto(url) {
 }
 
 async function ensureComposerOpen() {
-  const already = await anyDialog(live.page).first().isVisible().catch(() => false);
+  const already = await anyDialog(live.page)
+    .first()
+    .isVisible()
+    .catch(() => false);
   if (already) return;
   const opener = await firstVisible(composerOpeners(live.page), 2500);
   if (!opener) throw err("UI_CHANGED", "Không thấy «Bạn đang nghĩ gì?» / Tạo bài viết trên trang.");
   await safeClick(opener);
   const start = Date.now();
   while (Date.now() - start < 8000) {
-    const vis = await anyDialog(live.page).first().isVisible().catch(() => false);
+    const vis = await anyDialog(live.page)
+      .first()
+      .isVisible()
+      .catch(() => false);
     if (vis) return;
     await new Promise((r) => setTimeout(r, 300));
   }
@@ -296,31 +296,15 @@ async function ensureComposerOpen() {
 async function typeText(_name, text) {
   await ensureComposerOpen();
   const target = await firstVisible(composerTargets(live.page), 2500);
-  if (target) {
-    await safeClick(target);
-  } else {
-    const dlg = anyDialog(live.page).last();
-    const box = dlg.locator("div").nth(0);
-    await box.click({ force: true, timeout: 4000 }).catch(() => {});
-  }
+  if (target) await safeClick(target);
   await new Promise((r) => setTimeout(r, 250));
   await live.page.keyboard.insertText(String(text || ""));
 }
 
 async function uploadFiles(files) {
   await ensureComposerOpen();
-  const dlg = anyDialog(live.page);
-  const add = await firstVisible(
-    [
-      dlg.getByRole("button", { name: /thêm ảnh|photo|video|tải ảnh/i }),
-      dlg.locator('[aria-label*="Thêm ảnh" i], [aria-label*="photo" i]'),
-    ],
-    1500,
-  );
-  if (add) await safeClick(add).catch(() => {});
-  const input = live.page.locator('[role="dialog"] input[type="file"], [aria-modal="true"] input[type="file"]');
-  if ((await input.count()) === 0) throw err("UI_CHANGED", "Không thấy input ảnh trong hộp thoại.");
-  await input.last().setInputFiles(files);
+  const list = Array.isArray(files) ? files : [files];
+  await media.uploadToFacebook(live.page, list.filter(Boolean));
 }
 
 async function clickNamed(name) {
