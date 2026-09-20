@@ -1,3 +1,11 @@
+# PMAI 1.0.1 — 2026-09-20
+
+Sửa **upload video + caption**: không còn mở hộp Open Windows (picker ảnh `.tif/.jfif`), không đăng bài chỉ có chữ.
+
+- Gắn mp4/mov vào `input[type=file]` nhận video (`setInputFiles`), không bấm nhầm ô ảnh.
+- Chờ player / «Đang tải» trước khi bấm Tiếp/Đăng. Thiếu video thì dừng, không auto đăng.
+- Luồng ảnh và đăng bài giữ nguyên.
+
 # PMAI 1.0.0 — 2026-09-20
 
 Bản chốt bước đầu: **soạn bài + ảnh/video → duyệt tay → đăng lên Facebook Page thành công**.
