@@ -179,4 +179,32 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
       assert.equal(await page.evaluate(() => window.__cta), "publish");
     });
   });
+
+  it("PROFILE: clicks Đăng on Tạo bài viết, never Tiếp", async () => {
+    await withChromium(async (browser) => {
+      const { publishFromComposer } = require("./facebook-publish.cjs");
+      const page = await browser.newPage();
+      await page.setContent(`<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"></head>
+<body>
+  <div role="dialog" aria-modal="true" id="composer">
+    <h2>Tạo bài viết</h2>
+    <div contenteditable="true">Bạn đang nghĩ gì?</div>
+    <div id="next" role="button" tabindex="0">Tiếp</div>
+    <div id="publish" role="button" tabindex="0">Đăng</div>
+  </div>
+  <script>
+    window.__cta = null;
+    document.getElementById("next").addEventListener("click", () => { window.__cta = "next"; });
+    document.getElementById("publish").addEventListener("click", () => {
+      window.__cta = "publish";
+      document.getElementById("composer").remove();
+    });
+  </script>
+</body></html>`);
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PROFILE" });
+      assert.equal(result.ok, true);
+      assert.equal(await page.evaluate(() => window.__cta), "publish");
+    });
+  });
 });

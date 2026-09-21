@@ -1,3 +1,13 @@
+# PMAI 1.2.2 — 2026-09-21
+
+Sửa **ảnh upload nhưng không hiện trong composer** (PROFILE `MEDIA_PREVIEW_READY` timeout → không bấm Đăng).
+
+- Gắn ảnh vào `input[type=file]` **trong modal Tạo bài viết**, không vào input cover/avatar của trang.
+- Chờ thumbnail lớn (bỏ qua avatar 40px). Thiếu preview → không đăng bài chỉ có chữ.
+- Profile: «Bạn đang nghĩ gì?» → Tạo bài viết → caption → Ảnh/video → Đăng. Không dùng «Chia sẻ suy nghĩ…».
+- Group: «Bạn viết gì đi…» → Tạo bài viết → Đăng.
+- Fanpage: Tiếp → Cài đặt bài viết → Đăng (giữ nguyên).
+
 # PMAI 1.2.1 — 2026-09-21
 
 Sửa **không mở được composer** trên group/profile (lỗi `Không thấy ô soạn Bạn đang nghĩ gì`).

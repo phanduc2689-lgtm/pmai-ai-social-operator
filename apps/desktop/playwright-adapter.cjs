@@ -32,8 +32,10 @@ function sleep(ms) {
 function isComposerCue(text) {
   const t = String(text || "").replace(/\s+/g, " ").trim();
   if (!t) return false;
-  if (/tạo nhóm mới|create (a )?new group|đăng ẩn danh|post anonymously/i.test(t)) return false;
-  return /bạn đang nghĩ gì|bạn viết gì đi|viết gì đó|tạo bài viết|tạo bài viết công khai|write something|write a post|what['’`]?s on your mind|create a post|create a public post|start a discussion|share your thoughts|chia sẻ suy nghĩ|đăng bài viết|bắt đầu thảo luận/i.test(
+  if (/tạo nhóm mới|create (a )?new group|đăng ẩn danh|post anonymously|chia sẻ suy nghĩ|share your thoughts/i.test(t)) {
+    return false;
+  }
+  return /bạn đang nghĩ gì|bạn viết gì đi|viết gì đó|tạo bài viết|tạo bài viết công khai|write something|write a post|what['’`]?s on your mind|create a post|create a public post|start a discussion|đăng bài viết|bắt đầu thảo luận/i.test(
     t,
   );
 }
@@ -43,19 +45,21 @@ function anyDialog(page) {
 }
 
 function composerOpeners(page) {
+  const url = typeof page.url === "function" ? String(page.url() || "") : "";
+  const isGroup = /\/groups\//i.test(url);
+  const cue = isGroup
+    ? /bạn viết gì đi|write something|write a post|tạo bài viết|create a post|create a public post|start a discussion|bắt đầu thảo luận/i
+    : /bạn đang nghĩ gì|what.?s on your mind|tạo bài viết|create a post/i;
   const main = page.locator('[role="main"]');
-  const cue =
-    /bạn đang nghĩ gì|bạn viết gì đi|viết gì đó|write something|write a post|what.?s on your mind|tạo bài viết|create a post|create a public post|start a discussion|chia sẻ suy nghĩ|share your thoughts|đăng bài viết|bắt đầu thảo luận/i;
   return [
-    page.getByRole("button", { name: /tạo bài viết|create a post|create a public post|đăng bài viết/i }).first(),
+    main.getByText(cue).first(),
+    page.getByRole("button", { name: /tạo bài viết|create a post|create a public post/i }).first(),
     page.getByPlaceholder(cue).first(),
     page.getByLabel(cue).first(),
     page.locator("[aria-placeholder]").filter({ hasText: cue }).first(),
     page.getByText(cue).first(),
-    main.getByText(cue).first(),
     main.locator('[role="button"]').filter({ hasText: cue }).first(),
     page.locator('[aria-label*="Tạo bài" i], [aria-label*="Create a post" i], [aria-label*="Create post" i], [aria-label*="Write something" i]').first(),
-    page.locator('[contenteditable="true"]').first(),
   ];
 }
 
@@ -308,6 +312,8 @@ async function goto(url) {
 }
 
 async function composerReady(page) {
+  if (await page.getByText("Tạo bài viết", { exact: true }).first().isVisible().catch(() => false)) return true;
+  if (await page.getByText("Create post", { exact: true }).first().isVisible().catch(() => false)) return true;
   if (await anyDialog(page).first().isVisible().catch(() => false)) return true;
   const editors = page.locator(
     '[role="dialog"] [contenteditable="true"], [aria-modal="true"] [contenteditable="true"], [role="dialog"] [data-lexical-editor="true"]',
@@ -318,8 +324,8 @@ async function composerReady(page) {
 
 async function clickComposerInPage(page) {
   const payload = {
-    cue: "bạn đang nghĩ gì|bạn viết gì đi|viết gì đó|write something|write a post|what['’`]?s on your mind|create a post|create a public post|start a discussion|tạo bài viết|chia sẻ suy nghĩ|share your thoughts|đăng bài viết|bắt đầu thảo luận",
-    skip: "tạo nhóm mới|create (a )?new group|đăng ẩn danh",
+    cue: "bạn đang nghĩ gì|bạn viết gì đi|viết gì đó|write something|write a post|what['’`]?s on your mind|create a post|create a public post|start a discussion|tạo bài viết|đăng bài viết|bắt đầu thảo luận",
+    skip: "tạo nhóm mới|create (a )?new group|đăng ẩn danh|chia sẻ suy nghĩ|share your thoughts",
   };
   for (const frame of typeof page.frames === "function" ? page.frames() : [page]) {
     try {
@@ -388,7 +394,7 @@ async function ensureComposerOpen() {
 
 async function typeText(_name, text) {
   await ensureComposerOpen();
-  const target = await firstVisible(composerTargets(live.page), 2500);
+  const target = await firstVisible(composerTargets(live.page), 8000);
   if (target) await safeClick(target);
   await new Promise((r) => setTimeout(r, 250));
   await live.page.keyboard.insertText(String(text || ""));

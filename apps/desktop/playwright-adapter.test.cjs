@@ -20,4 +20,11 @@ describe("composer cues", () => {
     assert.equal(isComposerCue("Đăng ẩn danh"), false);
     assert.equal(isComposerCue("Create new group"), false);
   });
+
+  it("does not use cover bubble «Chia sẻ suy nghĩ» as the profile composer", () => {
+    assert.equal(isComposerCue("Chia sẻ suy nghĩ..."), false);
+    assert.equal(isComposerCue("Share your thoughts"), false);
+    assert.equal(isComposerCue("Bạn đang nghĩ gì?"), true);
+    assert.equal(isComposerCue("Bạn viết gì đi..."), true);
+  });
 });

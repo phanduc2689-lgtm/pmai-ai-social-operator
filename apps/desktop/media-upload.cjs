@@ -343,42 +343,184 @@ async function attachVideoOnPage(page, files) {
   await waitForVideoAttached(page);
 }
 
+function pickImageInputIndex(metas) {
+  if (!Array.isArray(metas) || !metas.length) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const m of metas) {
+    const a = String(m.accept || "").toLowerCase();
+    const videoOnly = /video\/|\.mp4|\.mov|\.webm|\.m4v/.test(a) && !/image\/|\.jpe?g|\.png|\.gif|\.webp|\.tif|\.heic/.test(a) && a.length > 0;
+    let score = 0;
+    if (videoOnly) score = 0;
+    else if (acceptLooksImageOnly(a)) score = 4;
+    else if (/image\//.test(a)) score = 3;
+    else if (!a || a === "*/*") score = 2;
+    else score = 1;
+    if (score > bestScore) {
+      bestScore = score;
+      best = typeof m.index === "number" ? m.index : metas.indexOf(m);
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+/** True when composer shows an attached photo/video, ignoring 32–48px avatars. */
+function inspectComposerMediaPreview() {
+  const roots = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"], [role="sheet"]')];
+  const heading = [...document.querySelectorAll("h1,h2,h3,h4,[role='heading']")].find((el) => {
+    const n = String(el.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return (
+      n === "Tạo bài viết" ||
+      n === "Create post" ||
+      n === "Create a post" ||
+      n === "Cài đặt bài viết" ||
+      n === "Post settings"
+    );
+  });
+  let scope = roots.length ? roots[roots.length - 1] : document.body;
+  if (heading) {
+    let p = heading.parentElement;
+    while (p && p !== document.documentElement) {
+      if (p.querySelector && p.querySelector("img, video, [contenteditable='true']")) {
+        scope = p;
+        break;
+      }
+      p = p.parentElement;
+    }
+  }
+
+  const avatarish = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 72 || r.height < 72) return true;
+    const label = String(el.getAttribute("alt") || el.getAttribute("aria-label") || "").toLowerCase();
+    return /avatar|profile picture|ảnh đại diện|user profile/.test(label);
+  };
+
+  for (const el of scope.querySelectorAll("img, video")) {
+    if (avatarish(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width >= 72 && r.height >= 72 && r.bottom > 0 && r.top < innerHeight) return true;
+  }
+  for (const el of scope.querySelectorAll("[aria-label]")) {
+    if (/gỡ|remove photo|remove video|xóa ảnh|xóa video|remove attachment/i.test(el.getAttribute("aria-label") || "")) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 8 && r.height > 8) return true;
+    }
+  }
+  for (const el of scope.querySelectorAll("div")) {
+    const bg = window.getComputedStyle(el).backgroundImage || "";
+    if (!/url\(/.test(bg)) continue;
+    if (!/blob:|fbcdn|scontent/i.test(bg)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width >= 120 && r.height >= 80) return true;
+  }
+  return false;
+}
+
+async function hasComposerMediaPreview(page) {
+  try {
+    return Boolean(await page.evaluate(inspectComposerMediaPreview));
+  } catch {
+    return false;
+  }
+}
+
+async function waitForImageAttached(page, timeoutMs) {
+  const deadline = Date.now() + (timeoutMs || 25000);
+  while (Date.now() < deadline) {
+    if (await hasComposerMediaPreview(page)) return;
+    const processing = await page
+      .locator('[role="dialog"], [aria-modal="true"]')
+      .getByText(/đang tải|uploading|đang xử lý|processing/i)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (processing) {
+      await sleep(400);
+      continue;
+    }
+    await sleep(350);
+  }
+  throw err(
+    "NOT_READY",
+    "Chưa thấy ảnh trong composer (bỏ qua avatar). Không đăng bài chỉ có chữ. Bấm «Ảnh/video» trong modal Tạo bài viết.",
+  );
+}
+
+async function clickPhotoOpener(page) {
+  const dialog = page.locator('[role="dialog"], [aria-modal="true"]').last();
+  const candidates = [
+    dialog.locator('[aria-label="Ảnh/video" i], [aria-label="Photo/video" i]').first(),
+    dialog.getByRole("button", { name: /^ảnh\/video$|^photo\/video$/i }).first(),
+    dialog.getByText(/^Ảnh\/video$|^Photo\/video$/).first(),
+    dialog.locator('[aria-label*="Thêm ảnh" i], [aria-label*="Add photo" i], [aria-label*="Photo/video" i]').first(),
+  ];
+  for (const loc of candidates) {
+    try {
+      if (await loc.isVisible({ timeout: 700 })) {
+        await loc.click({ timeout: 2500, force: true });
+        return true;
+      }
+    } catch {
+      /* next */
+    }
+  }
+  return false;
+}
+
 async function attachImagesOnPage(page, files) {
   if (!files.length) return;
   for (const f of files) {
     if (looksLikeMediaId(f)) throw err("NOT_READY", `Khong setInputFiles id ${f}`);
-  }
-  const inputs = page.locator('input[type="file"]');
-  if ((await inputs.count()) === 0) {
-    const openers = [
-      page.getByRole("button", { name: /ảnh\/video|photo\/video|thêm ảnh|add photo/i }).first(),
-      page.getByText(/ảnh\/video|photo\/video|thêm ảnh\/video/i).first(),
-      page.locator('[aria-label*="Ảnh" i], [aria-label*="Photo" i], [aria-label*="photo" i]').first(),
-    ];
-    for (const loc of openers) {
-      try {
-        if (await loc.isVisible({ timeout: 1200 })) {
-          await loc.click({ timeout: 3000, force: true });
-          break;
-        }
-      } catch {
-        /* next */
-      }
+    if (detectKind(f) === "video") {
+      throw err("SCHEMA_INVALID", `attachImages nhan file video: ${f}`);
     }
   }
-  const input = page.locator('input[type="file"]').last();
-  try {
-    await input.waitFor({ state: "attached", timeout: 12000 });
-  } catch {
-    throw err("UI_CHANGED", "Facebook chua render input[type=file]. Dong hop Open neu dang mo.");
+
+  const trySet = async (dialogOnly) => {
+    const metas = await listFileInputs(page, dialogOnly);
+    const idx = pickImageInputIndex(metas);
+    if (idx == null) return false;
+    await fileInputLocator(page, idx, dialogOnly).setInputFiles(files);
+    return true;
+  };
+
+  if (await trySet(true)) {
+    try {
+      await waitForImageAttached(page, 12000);
+      return;
+    } catch {
+      /* input in dialog was not the composer photo slot — use Ảnh/video */
+    }
   }
-  await input.setInputFiles(files);
-  const preview = page.locator('[role="dialog"] img, [aria-modal="true"] img, [role="dialog"] video').first();
+
+  let usedChooser = false;
   try {
-    await preview.waitFor({ state: "visible", timeout: 20000 });
+    const chooserPromise = page.waitForEvent("filechooser", { timeout: 6000 });
+    const clicked = await clickPhotoOpener(page);
+    if (clicked) {
+      const chooser = await chooserPromise;
+      usedChooser = true;
+      await chooser.setFiles(files);
+    } else {
+      chooserPromise.catch(() => {});
+    }
   } catch {
-    await sleep(2000);
+    /* no native chooser */
   }
+
+  if (!usedChooser) {
+    const inDialog = await trySet(true);
+    if (!inDialog) {
+      throw err(
+        "UI_CHANGED",
+        "Không thấy ô file ảnh trong modal Tạo bài viết. Không gắn vào input cover/avatar ngoài composer.",
+      );
+    }
+  }
+  await waitForImageAttached(page);
 }
 
 async function attachFilesOnPage(page, files, kind) {
@@ -416,4 +558,8 @@ module.exports = {
   acceptLooksImageOnly,
   acceptLooksVideo,
   pickVideoInputIndex,
+  pickImageInputIndex,
+  inspectComposerMediaPreview,
+  hasComposerMediaPreview,
+  waitForImageAttached,
 };

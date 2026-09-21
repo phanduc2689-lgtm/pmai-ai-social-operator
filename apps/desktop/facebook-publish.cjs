@@ -126,15 +126,13 @@ async function detectStage(page) {
 }
 
 async function waitMediaPreview(page, timeout = 8000) {
-  const scoped = page.locator(
-    '[role="dialog"] img, [aria-modal="true"] img, [role="sheet"] img, [role="dialog"] video, [aria-modal="true"] video, [role="sheet"] video',
-  );
-  try {
-    await scoped.first().waitFor({ state: "visible", timeout });
-    return true;
-  } catch {
-    return false;
+  const media = require("./media-upload.cjs");
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (await media.hasComposerMediaPreview(page)) return true;
+    await sleep(280);
   }
+  return false;
 }
 
 async function waitStage(page, want, timeout = 20000) {
@@ -522,9 +520,10 @@ async function publishPageComposer(page, opts = {}) {
     return e;
   };
 
-  if (opts.hasMedia !== false) {
-    const preview = await waitMediaPreview(page, 8000);
+  if (opts.hasMedia) {
+    const preview = await waitMediaPreview(page, 20000);
     mark("MEDIA_PREVIEW_READY", preview, preview ? "ok" : "timeout");
+    if (!preview) throw fail("NOT_READY", "Chưa thấy ảnh/video trong composer. Không đăng bài chỉ có chữ.");
   }
 
   let stage = await detectStage(page);
