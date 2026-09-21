@@ -599,8 +599,6 @@ export class PmaiEngine {
       await adapter.click({ name: "composer" });
       this.log("publish.stage", "OK", "COMPOSER_OPENED", t.id);
       const caption = sanitizeComposerBody(c.body) || c.body;
-      this.log("publish.stage", "OK", "CONTENT_READY", t.id);
-      await adapter.type({ role: "textbox", name: "composer" }, caption);
       const files = uploadPaths(c.media, requirePath);
       if (files.length) {
         this.log("media.upload", "RUNNING", files.map((f) => f.split(/[/\\]/).pop()).join(", "), t.id);
@@ -608,6 +606,8 @@ export class PmaiEngine {
         this.log("media.upload", "OK", String(files.length), t.id);
         this.log("publish.stage", "OK", "MEDIA_UPLOADED", t.id);
       }
+      this.log("publish.stage", "OK", "CONTENT_READY", t.id);
+      await adapter.type({ role: "textbox", name: "composer" }, caption);
 
       const preview = await adapter.observe();
       if (adapter instanceof FakeBrowserAdapter && !adapter.previewValid({ body: caption, pageUrl: page.url })) {

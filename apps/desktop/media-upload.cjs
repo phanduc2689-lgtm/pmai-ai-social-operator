@@ -268,18 +268,100 @@ async function waitForVideoAttached(page, timeoutMs) {
   );
 }
 
-async function clickVideoOpener(page) {
+function clickComposerMediaToolbar(wantVideo) {
+  const headingRe = /^(Tạo bài viết|Create post|Create a post)$/i;
+  const headings = [...document.querySelectorAll("h1,h2,h3,h4,[role='heading']")];
+  const heading = headings.find((el) => headingRe.test(String(el.textContent || "").replace(/\s+/g, " ").trim()));
+  let scope = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')].at(-1) || document.body;
+  if (heading) {
+    let p = heading.parentElement;
+    while (p && p !== document.documentElement) {
+      const r = p.getBoundingClientRect();
+      if (r.height > 180 && r.width > 180) {
+        scope = p;
+        break;
+      }
+      p = p.parentElement;
+    }
+  }
+
+  const photoRe = /ảnh\/video|photo\/video|photos?\/videos?|add photo|thêm ảnh|photo and video/i;
+  const videoRe = /tải video|upload video|add video|^video$/i;
+  const skip = /gắn thẻ|tag people|cảm xúc|feeling|check.?in|gif|live|phát trực tiếp|camera|sticker/i;
+
+  const clickables = [...scope.querySelectorAll('[aria-label], [role="button"], [tabindex="0"]')];
+  let best = null;
+  let bestScore = 0;
+  for (const el of clickables) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 16 || r.height < 16 || r.bottom < 0 || r.top > innerHeight) continue;
+    const aria = el.getAttribute("aria-label") || "";
+    const text = String(el.innerText || "").replace(/\s+/g, " ").trim();
+    if (text.length > 48) continue;
+    const blob = `${aria} ${text}`;
+    if (skip.test(blob)) continue;
+    let score = 0;
+    if (photoRe.test(blob)) score = wantVideo ? 8 : 12;
+    if (wantVideo && (videoRe.test(aria) || videoRe.test(text))) score = 14;
+    if (score > bestScore) {
+      bestScore = score;
+      best = el;
+    }
+  }
+
+  if (!best) {
+    const addEl = [...scope.querySelectorAll("span,div,h3,h4")].find((el) => {
+      const t = String(el.innerText || "").replace(/\s+/g, " ").trim();
+      return /thêm vào bài viết của bạn|add to your post/i.test(t) && t.length < 80;
+    });
+    if (addEl) {
+      let row = addEl.parentElement;
+      for (let i = 0; i < 6 && row; i++) {
+        const btns = [...row.querySelectorAll('[role="button"], [tabindex="0"]')].filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width >= 20 && r.width <= 88 && r.height >= 20 && r.height <= 88;
+        });
+        if (btns.length) {
+          best = wantVideo
+            ? btns.find((b) => /video/i.test(b.getAttribute("aria-label") || "")) || btns[0]
+            : btns[0];
+          bestScore = 5;
+          break;
+        }
+        row = row.parentElement;
+      }
+    }
+  }
+
+  if (!best) return { ok: false };
+  best.click();
+  return { ok: true, label: String(best.getAttribute("aria-label") || best.innerText || "").slice(0, 48) };
+}
+
+async function clickMediaToolbar(page, wantVideo) {
+  try {
+    const viaEval = await page.evaluate(clickComposerMediaToolbar, Boolean(wantVideo));
+    if (viaEval && viaEval.ok) return true;
+  } catch {
+    /* fall through */
+  }
   const dialog = page.locator('[role="dialog"], [aria-modal="true"]').last();
-  const candidates = [
-    dialog.locator('[aria-label="Video" i]').first(),
-    dialog.getByRole("button", { name: /^video$/i }).first(),
-    dialog.getByText(/^Video$/).first(),
-    dialog.locator('[aria-label*="Tải video" i], [aria-label*="Upload video" i]').first(),
-    dialog.locator('[aria-label*="Ảnh/video" i], [aria-label*="Photo/video" i], [aria-label*="ảnh/video" i]').first(),
-  ];
-  for (const loc of candidates) {
+  const locators = wantVideo
+    ? [
+        dialog.locator('[aria-label="Video" i]').first(),
+        dialog.getByRole("button", { name: /^video$/i }).first(),
+        dialog.locator('[aria-label*="Ảnh/video" i], [aria-label*="Photo/video" i]').first(),
+      ]
+    : [
+        dialog.locator('[aria-label="Ảnh/video" i], [aria-label="Photo/video" i]').first(),
+        dialog.locator('[aria-label*="Ảnh/video" i], [aria-label*="Photo/video" i], [aria-label*="Photo" i]').first(),
+        dialog.getByRole("button", { name: /ảnh\/video|photo\/video|ảnh|photo/i }).first(),
+        dialog.getByText(/^Ảnh\/video$|^Photo\/video$/).first(),
+        page.getByText(/thêm vào bài viết của bạn|add to your post/i).first(),
+      ];
+  for (const loc of locators) {
     try {
-      if (await loc.isVisible({ timeout: 700 })) {
+      if (await loc.isVisible({ timeout: 600 })) {
         await loc.click({ timeout: 2500, force: true });
         return true;
       }
@@ -290,6 +372,85 @@ async function clickVideoOpener(page) {
   return false;
 }
 
+function pickLastMatching(metas, picker) {
+  if (!Array.isArray(metas) || !metas.length) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const m of metas) {
+    const a = String(m.accept || "").toLowerCase();
+    const score =
+      picker === "video"
+        ? acceptLooksImageOnly(a)
+          ? 0
+          : /video\/|\.mp4|\.mov|\.webm/.test(a)
+            ? 3
+            : !a || a === "*/*"
+              ? 2
+              : /video/.test(a)
+                ? 3
+                : 1
+        : /video\/|\.mp4/.test(a) && !/image\//.test(a) && a
+          ? 0
+          : acceptLooksImageOnly(a)
+            ? 4
+            : /image\//.test(a)
+              ? 3
+              : !a || a === "*/*"
+                ? 2
+                : 1;
+    if (score > 0 && score >= bestScore) {
+      bestScore = score;
+      best = typeof m.index === "number" ? m.index : metas.indexOf(m);
+    }
+  }
+  return best;
+}
+
+async function attachViaChooserOrInput(page, files, kind) {
+  const before = await listFileInputs(page, false);
+  const chooserPromise = page.waitForEvent("filechooser", { timeout: 8000 }).catch(() => null);
+  const clicked = await clickMediaToolbar(page, kind === "video");
+  const chooser = clicked ? await chooserPromise : null;
+  if (!clicked) chooserPromise.then(() => null);
+  if (chooser) {
+    await chooser.setFiles(files);
+    return { via: "filechooser", clicked };
+  }
+
+  await sleep(500);
+  const after = await listFileInputs(page, false);
+  const picker = kind === "video" ? (m) => pickVideoInputIndex(m) : (m) => pickImageInputIndex(m);
+
+  if (after.length > before.length) {
+    const newcomers = after.slice(before.length);
+    const idx = picker(newcomers);
+    if (idx != null) {
+      await fileInputLocator(page, idx, false).setInputFiles(files);
+      return { via: "new-input", clicked };
+    }
+  }
+
+  const dialogMetas = await listFileInputs(page, true);
+  const dialogIdx = picker(dialogMetas);
+  if (dialogIdx != null) {
+    await fileInputLocator(page, dialogIdx, true).setInputFiles(files);
+    return { via: "dialog-input", clicked };
+  }
+
+  const lastIdx = pickLastMatching(after, kind === "video" ? "video" : "image");
+  if (lastIdx != null && clicked) {
+    await fileInputLocator(page, lastIdx, false).setInputFiles(files);
+    return { via: "last-input-after-toolbar", clicked };
+  }
+
+  throw err(
+    "UI_CHANGED",
+    kind === "video"
+      ? "Không gắn được video. Bấm «Ảnh/video» trong modal Tạo bài viết — không dùng hộp Open Windows."
+      : "Không gắn được ảnh. Bấm «Ảnh/video» trong «Thêm vào bài viết của bạn», không dùng cover/avatar.",
+  );
+}
+
 async function attachVideoOnPage(page, files) {
   for (const f of files) {
     if (looksLikeMediaId(f)) throw err("NOT_READY", `Khong setInputFiles id ${f}`);
@@ -297,49 +458,7 @@ async function attachVideoOnPage(page, files) {
       throw err("SCHEMA_INVALID", `attachVideo nhan file khong phai video: ${f}`);
     }
   }
-
-  const trySet = async (dialogOnly) => {
-    const metas = await listFileInputs(page, dialogOnly);
-    const idx = pickVideoInputIndex(metas);
-    if (idx == null) return false;
-    await fileInputLocator(page, idx, dialogOnly).setInputFiles(files);
-    return true;
-  };
-
-  if (await trySet(true)) {
-    await waitForVideoAttached(page);
-    return;
-  }
-  if (await trySet(false)) {
-    await waitForVideoAttached(page);
-    return;
-  }
-
-  // No video-capable input yet. Intercept the chooser — never leave the OS Open dialog up.
-  let usedChooser = false;
-  try {
-    const chooserPromise = page.waitForEvent("filechooser", { timeout: 6000 });
-    const clicked = await clickVideoOpener(page);
-    if (clicked) {
-      const chooser = await chooserPromise;
-      usedChooser = true;
-      await chooser.setFiles(files);
-    } else {
-      chooserPromise.catch(() => {});
-    }
-  } catch {
-    /* chooser not offered — fall through to hidden input */
-  }
-
-  if (!usedChooser) {
-    const ok = (await trySet(true)) || (await trySet(false));
-    if (!ok) {
-      throw err(
-        "UI_CHANGED",
-        "Không thấy ô file nhận video (mp4/mov). Không dùng hộp Open Windows. Mở composer «Tạo bài viết» rồi thử lại.",
-      );
-    }
-  }
+  await attachViaChooserOrInput(page, files, "video");
   await waitForVideoAttached(page);
 }
 
@@ -450,24 +569,7 @@ async function waitForImageAttached(page, timeoutMs) {
 }
 
 async function clickPhotoOpener(page) {
-  const dialog = page.locator('[role="dialog"], [aria-modal="true"]').last();
-  const candidates = [
-    dialog.locator('[aria-label="Ảnh/video" i], [aria-label="Photo/video" i]').first(),
-    dialog.getByRole("button", { name: /^ảnh\/video$|^photo\/video$/i }).first(),
-    dialog.getByText(/^Ảnh\/video$|^Photo\/video$/).first(),
-    dialog.locator('[aria-label*="Thêm ảnh" i], [aria-label*="Add photo" i], [aria-label*="Photo/video" i]').first(),
-  ];
-  for (const loc of candidates) {
-    try {
-      if (await loc.isVisible({ timeout: 700 })) {
-        await loc.click({ timeout: 2500, force: true });
-        return true;
-      }
-    } catch {
-      /* next */
-    }
-  }
-  return false;
+  return clickMediaToolbar(page, false);
 }
 
 async function attachImagesOnPage(page, files) {
@@ -478,48 +580,7 @@ async function attachImagesOnPage(page, files) {
       throw err("SCHEMA_INVALID", `attachImages nhan file video: ${f}`);
     }
   }
-
-  const trySet = async (dialogOnly) => {
-    const metas = await listFileInputs(page, dialogOnly);
-    const idx = pickImageInputIndex(metas);
-    if (idx == null) return false;
-    await fileInputLocator(page, idx, dialogOnly).setInputFiles(files);
-    return true;
-  };
-
-  if (await trySet(true)) {
-    try {
-      await waitForImageAttached(page, 12000);
-      return;
-    } catch {
-      /* input in dialog was not the composer photo slot — use Ảnh/video */
-    }
-  }
-
-  let usedChooser = false;
-  try {
-    const chooserPromise = page.waitForEvent("filechooser", { timeout: 6000 });
-    const clicked = await clickPhotoOpener(page);
-    if (clicked) {
-      const chooser = await chooserPromise;
-      usedChooser = true;
-      await chooser.setFiles(files);
-    } else {
-      chooserPromise.catch(() => {});
-    }
-  } catch {
-    /* no native chooser */
-  }
-
-  if (!usedChooser) {
-    const inDialog = await trySet(true);
-    if (!inDialog) {
-      throw err(
-        "UI_CHANGED",
-        "Không thấy ô file ảnh trong modal Tạo bài viết. Không gắn vào input cover/avatar ngoài composer.",
-      );
-    }
-  }
+  await attachViaChooserOrInput(page, files, "image");
   await waitForImageAttached(page);
 }
 
@@ -562,4 +623,6 @@ module.exports = {
   inspectComposerMediaPreview,
   hasComposerMediaPreview,
   waitForImageAttached,
+  clickComposerMediaToolbar,
+  pickLastMatching,
 };

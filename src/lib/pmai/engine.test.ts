@@ -176,6 +176,8 @@ describe("invariants", () => {
     const upload = browser.calls.find((c) => c.method === "upload");
     assert.ok(upload);
     assert.deepEqual(upload.args[0], ["C:\\\\media\\\\tour.jpg"]);
+    const methods = browser.calls.map((c) => c.method);
+    assert.ok(methods.indexOf("upload") < methods.indexOf("type"), "media before caption");
   });
 
   it("rejects mixed image and video", async () => {

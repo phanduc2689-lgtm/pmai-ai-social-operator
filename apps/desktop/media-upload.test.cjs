@@ -7,8 +7,11 @@ const {
   acceptLooksVideo,
   pickVideoInputIndex,
   pickImageInputIndex,
+  pickLastMatching,
   detectKind,
   inspectComposerMediaPreview,
+  clickComposerMediaToolbar,
+  attachFilesOnPage,
 } = require("./media-upload.cjs");
 
 const PHOTO_ACCEPT =
@@ -68,6 +71,19 @@ describe("video vs photo file inputs", () => {
     );
     assert.equal(pickImageInputIndex([{ index: 0, accept: PHOTO_ACCEPT }]), 0);
   });
+
+  it("picks the last photo input after toolbar click, not the cover at index 0", () => {
+    assert.equal(
+      pickLastMatching(
+        [
+          { index: 0, accept: PHOTO_ACCEPT },
+          { index: 2, accept: PHOTO_ACCEPT },
+        ],
+        "image",
+      ),
+      2,
+    );
+  });
 });
 
 async function withChromium(fn) {
@@ -112,6 +128,40 @@ describe("composer media preview", () => {
   </div>
 </body></html>`);
       assert.equal(await page.evaluate(inspectComposerMediaPreview), true);
+    });
+  });
+
+  it("clicks Ảnh/video in Tạo bài viết, not the page cover picker", async () => {
+    await withChromium(async (browser) => {
+      const page = await browser.newPage();
+      await page.setContent(`<!doctype html>
+<html lang="vi"><body>
+  <input id="cover" type="file" accept="image/*">
+  <div role="dialog" aria-modal="true" style="width:480px;height:420px">
+    <h2>Tạo bài viết</h2>
+    <div contenteditable="true">Bạn đang nghĩ gì?</div>
+    <p>Thêm vào bài viết của bạn</p>
+    <div aria-label="Ảnh/video" role="button" id="photo" tabindex="0" style="width:40px;height:40px;background:#1877f2">Ảnh/video</div>
+  </div>
+  <script>
+    window.__cover = 0;
+    window.__composer = 0;
+    document.getElementById("cover").addEventListener("click", () => { window.__cover++; });
+    document.getElementById("photo").addEventListener("click", () => {
+      window.__composer++;
+      const i = document.createElement("input");
+      i.type = "file";
+      i.accept = "image/*";
+      i.id = "composer-file";
+      document.body.appendChild(i);
+    });
+  </script>
+</body></html>`);
+      const hit = await page.evaluate(clickComposerMediaToolbar, false);
+      assert.equal(hit.ok, true);
+      assert.equal(await page.evaluate(() => window.__composer), 1);
+      assert.equal(await page.evaluate(() => window.__cover), 0);
+      assert.equal(await page.locator("#composer-file").count(), 1);
     });
   });
 });

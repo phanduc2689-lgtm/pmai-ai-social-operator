@@ -1,3 +1,11 @@
+# PMAI 1.2.3 — 2026-09-21
+
+Bài kèm ảnh/video: **gắn media trước**, điền caption sau, rồi mới Đăng.
+
+- Bấm «Ảnh/video» trong «Thêm vào bài viết của bạn» (không dùng input cover/avatar).
+- Chặn filechooser Playwright — không để hộp Open Windows treo.
+- Sau khi có thumbnail mới gõ nội dung.
+
 # PMAI 1.2.2 — 2026-09-21
 
 Sửa **ảnh upload nhưng không hiện trong composer** (PROFILE `MEDIA_PREVIEW_READY` timeout → không bấm Đăng).
