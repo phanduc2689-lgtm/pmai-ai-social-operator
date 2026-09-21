@@ -5,7 +5,7 @@ import { getEngine } from "./host.ts";
 import { hasElectronHost, hostInvoke } from "./ipc.ts";
 import { looksLikeMediaId, resolveMediaSource } from "./media.ts";
 import { rememberPreview } from "./media-preview.ts";
-import type { ContactTemplate, MediaAsset, VoiceProfile } from "./types.ts";
+import type { ContactTemplate, DestinationType, MediaAsset, VoiceProfile } from "./types.ts";
 
 export type LocalFileMeta = {
   name: string;
@@ -91,6 +91,24 @@ export function usePmai() {
     markLoggedIn: (name: string, opts?: { seedDemo?: boolean }) => run(() => engine.markLoggedIn(name, opts)),
     selectPage: (id: string) => run(() => engine.selectPage(id)),
     addPage: (name: string, url: string) => run(() => engine.addPage({ name, url })),
+    addDestination: (type: DestinationType, name: string, url: string) =>
+      run(() => engine.addDestination({ type, name, url })),
+    addProfileFromSession: async () => {
+      const identity = engine.snapshot().identity;
+      let url = identity?.profileUrl || "";
+      let name = identity?.displayName || "Trang cá nhân";
+      if (hasElectronHost()) {
+        const obs = await hostInvoke<{ url?: string; pageName?: string }>("chrome.observe");
+        if (obs.ok) {
+          url = obs.data?.url || url;
+          name = identity?.displayName && identity.displayName !== "Chưa đăng nhập" ? identity.displayName : obs.data?.pageName || name;
+        }
+      }
+      if (!url || !/facebook\.com/i.test(url)) {
+        url = "https://www.facebook.com/me";
+      }
+      return run(() => engine.addDestination({ type: "PROFILE", name, url }));
+    },
     removePage: (id: string) => run(() => engine.removePage(id)),
     createDraft: (brief: string) => run(() => engine.createDraft(brief)),
     updateDraft: (id: string, body: string, media?: MediaAsset[]) => run(() => engine.updateDraft(id, body, media ?? [])),

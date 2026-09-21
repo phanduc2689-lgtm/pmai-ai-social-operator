@@ -439,9 +439,79 @@ async function verifyPublished(page) {
 
 /**
  * @param {import('playwright').Page} page
- * @param {{ hasMedia?: boolean }} [opts]
+ * @param {{ hasMedia?: boolean, destinationType?: 'PROFILE'|'PAGE'|'GROUP' }} [opts]
  */
 async function publishFromComposer(page, opts = {}) {
+  const dest = opts.destinationType || "PAGE";
+  if (dest === "PROFILE" || dest === "GROUP") {
+    return publishDirectComposer(page, opts);
+  }
+  return publishPageComposer(page, opts);
+}
+
+async function clickDirectPublish(page) {
+  const composer = page
+    .locator('[role="dialog"], [aria-modal="true"], [role="sheet"]')
+    .filter({ hasText: /tạo bài viết|create post|create a post/i })
+    .last();
+  const layer = (await visible(composer, 800)) ? composer : page;
+  const publishBtn = layer
+    .getByRole("button", { name: /^Đăng$|^Post$/ })
+    .or(layer.locator('[role="button"]').filter({ hasText: /^Đăng$|^Post$/ }))
+    .or(layer.getByText(/^Đăng$/, { exact: true }))
+    .or(layer.getByText(/^Post$/, { exact: true }));
+  if (await visible(publishBtn.last(), 2500)) {
+    await safeClick(publishBtn.last());
+    return true;
+  }
+  return clickExactLabel(page, ["Đăng", "Post"]);
+}
+
+async function publishDirectComposer(page, opts = {}) {
+  const stages = [];
+  const mark = (name, ok = true, detail = "") => {
+    stages.push({ name, ok, detail });
+  };
+  const fail = (code, message) => {
+    const e = err(code, message);
+    e.stages = stages;
+    return e;
+  };
+
+  if (opts.hasMedia) {
+    const preview = await waitMediaPreview(page, 20000);
+    mark("MEDIA_PREVIEW_READY", preview, preview ? "ok" : "timeout");
+    if (!preview) throw fail("NOT_READY", "Chưa thấy ảnh/video trong composer. Không đăng bài chỉ có chữ.");
+  }
+
+  const stage = await detectStage(page);
+  mark("COMPOSER_STAGE", true, stage);
+  mark("PUBLISH_READY", true, "direct Đăng — không bấm Tiếp");
+
+  const found = await clickDirectPublish(page);
+  if (!found) {
+    throw fail("UI_CHANGED", "Không thấy nút Đăng trên modal Tạo bài viết (exact «Đăng», không phải «Đăng ẩn danh» / «Đăng ngay»).");
+  }
+  mark("PUBLISH_BUTTON_FOUND");
+  mark("PUBLISH_CLICKED");
+
+  const hidden = await dialogHidden(page, 30000);
+  mark("PUBLISH_PROCESSING", hidden, hidden ? "modal đóng" : "modal còn mở");
+  if (!hidden) {
+    const again = await clickDirectPublish(page);
+    if (again) {
+      mark("PUBLISH_CLICKED", true, "click lần 2");
+      await dialogHidden(page, 20000);
+    }
+  }
+
+  const ok = await verifyPublished(page);
+  if (!ok) throw fail("NEEDS_VERIFICATION", "Đã bấm Đăng nhưng chưa xác nhận bài lên. Không auto-retry.");
+  mark("PUBLISH_SUCCESS");
+  return { ok: true, stage: "PUBLISHED", stages };
+}
+
+async function publishPageComposer(page, opts = {}) {
   const stages = [];
   const mark = (name, ok = true, detail = "") => {
     stages.push({ name, ok, detail });
@@ -502,6 +572,9 @@ async function publishFromComposer(page, opts = {}) {
 
 module.exports = {
   publishFromComposer,
+  publishDirectComposer,
+  publishPageComposer,
+  clickDirectPublish,
   normalizeLabel,
   isExactPublishName,
   isExactNextName,

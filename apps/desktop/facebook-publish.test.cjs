@@ -17,6 +17,7 @@ describe("exact CTA names", () => {
     assert.equal(isExactPublishName("Đăng ngay"), false);
     assert.equal(isExactPublishName("Đăng bài"), false);
     assert.equal(isExactPublishName("Đăng lên Facebook"), false);
+    assert.equal(isExactPublishName("Đăng ẩn danh"), false);
   });
 
   it("normalizes NBSP / ZWSP so footer Đăng still matches", () => {

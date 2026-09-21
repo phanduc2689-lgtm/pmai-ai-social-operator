@@ -1,3 +1,5 @@
+import type { DestinationType } from "./types.ts";
+
 export type SemanticTarget = { role?: string; name: string };
 
 export interface Observation {
@@ -39,7 +41,7 @@ export interface BrowserAdapter {
   type(target: SemanticTarget, text: string): Promise<void>;
   upload(files: string[]): Promise<void>;
   click(target: SemanticTarget): Promise<void>;
-  publish(): Promise<PublishResult>;
+  publish(opts?: { destinationType?: DestinationType; hasMedia?: boolean }): Promise<PublishResult>;
   screenshot(): Promise<string>;
   close(): Promise<void>;
   calls: BrowserCall[];
@@ -116,8 +118,8 @@ export class FakeBrowserAdapter implements BrowserAdapter {
     }
   }
 
-  async publish(): Promise<PublishResult> {
-    this.calls.push({ method: "publish", args: [] });
+  async publish(opts?: { destinationType?: DestinationType; hasMedia?: boolean }): Promise<PublishResult> {
+    this.calls.push({ method: "publish", args: [opts ?? {}] });
     if (this.opts.crashAfterClickPublish) {
       throw Object.assign(new Error("disconnected"), { code: "BROWSER_CRASH" });
     }

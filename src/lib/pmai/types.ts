@@ -40,6 +40,8 @@ export type ApprovalStatus =
   | "STALE"
   | "CONSUMED";
 
+export type DestinationType = "PROFILE" | "PAGE" | "GROUP";
+
 export type ConnectionMode = "ATTACH_EXISTING" | "MANAGED_PROFILE";
 
 export type MediaKind = "image" | "video";
@@ -61,6 +63,8 @@ export interface FacebookIdentity {
   profileId: string;
   displayName: string;
   sessionStatus: SessionStatus;
+  profileUrl?: string;
+  facebookId?: string;
 }
 
 export interface PageTarget {
@@ -69,6 +73,8 @@ export interface PageTarget {
   name: string;
   url: string;
   status: PageStatus;
+  /** PROFILE | PAGE | GROUP. Missing on v1 rows → inferred from URL. */
+  type?: DestinationType;
 }
 
 export interface MediaAsset {

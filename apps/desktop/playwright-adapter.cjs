@@ -33,6 +33,7 @@ function composerOpeners(page) {
   return [
     page.getByRole("button", { name: /tạo bài viết|create a post|viết bài/i }).first(),
     page.getByText(/bạn đang nghĩ gì|what.?s on your mind/i).first(),
+    page.getByText(/bạn viết gì đi|write something/i).first(),
     page.locator('[aria-label*="Tạo bài" i], [aria-label*="Create a post" i], [aria-label*="Create post" i]').first(),
   ];
 }
@@ -41,6 +42,7 @@ function composerTargets(page) {
   const dlg = anyDialog(page);
   return [
     dlg.getByText(/bạn đang nghĩ gì|what.?s on your mind/i).last(),
+    dlg.getByText(/tạo bài viết công khai|bạn viết gì đi|write something/i).last(),
     dlg.locator('[contenteditable="true"]').first(),
     dlg.locator('[role="textbox"]').first(),
     dlg.locator('[data-lexical-editor="true"]').first(),
@@ -280,7 +282,7 @@ async function ensureComposerOpen() {
     .catch(() => false);
   if (already) return;
   const opener = await firstVisible(composerOpeners(live.page), 2500);
-  if (!opener) throw err("UI_CHANGED", "Không thấy «Bạn đang nghĩ gì?» / Tạo bài viết trên trang.");
+  if (!opener) throw err("UI_CHANGED", "Không thấy ô soạn «Bạn đang nghĩ gì?» / «Bạn viết gì đi…» / Tạo bài viết.");
   await safeClick(opener);
   const start = Date.now();
   while (Date.now() - start < 8000) {
@@ -321,11 +323,14 @@ async function clickNamed(name) {
   await safeClick(btn);
 }
 
-async function publishPost() {
+async function publishPost(opts = {}) {
   if (!live.page) throw err("NOT_READY", "Browser chưa launch");
   await ensureComposerOpen();
   const fbPublish = require("./facebook-publish.cjs");
-  return fbPublish.publishFromComposer(live.page, { hasMedia: true });
+  return fbPublish.publishFromComposer(live.page, {
+    hasMedia: opts.hasMedia !== false,
+    destinationType: opts.destinationType || "PAGE",
+  });
 }
 
 async function screenshotPng() {

@@ -1,3 +1,12 @@
+# PMAI 1.2.0 — 2026-09-21
+
+Mở rộng đích đăng Facebook: **Trang cá nhân + Fanpage + Group**.
+
+- Tài khoản: Chrome profile → Facebook identity → đích (PROFILE / PAGE / GROUP).
+- Composer lọc đích theo loại. Fanpage giữ luồng cũ: Tiếp → Cài đặt bài viết → Đăng.
+- Trang cá nhân / Group: modal Tạo bài viết → Đăng (không bấm Tiếp, không bật Đăng ẩn danh).
+- Không phá Page publishing, approval, media upload, CDP.
+
 # PMAI 1.0.1 — 2026-09-20
 
 Sửa **upload video + caption**: không còn mở hộp Open Windows (picker ảnh `.tif/.jfif`), không đăng bài chỉ có chữ.

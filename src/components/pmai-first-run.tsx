@@ -223,8 +223,8 @@ export function FirstRun({ api }: { api: ReturnType<typeof usePmai> }) {
         </li>
         <li className={`rounded-xl border bg-surface p-5 ${snap.firstRunStep === 3 ? "border-accent" : "border-border"}`}>
           <p className="font-sans text-xs text-subtle">Bước 3</p>
-          <h2 className="font-sans text-lg font-medium">Chọn trang đích</h2>
-          <p className="mt-1 text-sm text-muted">Dán URL Page Facebook thật sẽ nhận bài.</p>
+          <h2 className="font-sans text-lg font-medium">Chọn đích đăng</h2>
+          <p className="mt-1 text-sm text-muted">Thêm trang cá nhân, fanpage hoặc group. Composer Facebook chưa mở ở bước này.</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <input
               className="h-11 rounded-md border border-border px-3 text-sm"

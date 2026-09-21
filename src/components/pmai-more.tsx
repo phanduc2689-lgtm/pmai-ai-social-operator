@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Check, CircleAlert, Download } from "lucide-react";
+import { Check, CircleAlert, Download, Trash2 } from "lucide-react";
 import { PmaiLogo } from "@/components/pmai-logo.tsx";
+import { destGlyph, destKindLabel, destType } from "@/lib/pmai/dest.ts";
 import { downloadPublicFile } from "@/lib/pmai/download.ts";
 import { hasElectronHost } from "@/lib/pmai/ipc.ts";
+import type { DestinationType } from "@/lib/pmai/types.ts";
 import type { usePmai } from "@/lib/pmai/use-pmai.ts";
 
 const CLONE = `git clone https://github.com/phanduc2689-lgtm/pmai-ai-social-operator.git
@@ -11,12 +13,24 @@ CAI-DAT-WINDOWS.bat`;
 
 export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
   const { snap } = api;
-  const [pageName, setPageName] = useState("");
-  const [pageUrl, setPageUrl] = useState("https://www.facebook.com/");
+  const [picker, setPicker] = useState<null | DestinationType>(null);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("https://www.facebook.com/");
+
+  async function submit() {
+    if (!picker) return;
+    const added = await api.addDestination(picker, name, url);
+    if (added) {
+      setPicker(null);
+      setName("");
+      setUrl("https://www.facebook.com/");
+    }
+  }
+
   return (
     <section className="mx-auto max-w-2xl">
       <h1 className="font-serif text-3xl">Tài khoản</h1>
-      <p className="mt-2 text-sm text-muted">MVP1 một operator. Không lưu mật khẩu Facebook. Không copy cookie.</p>
+      <p className="mt-2 text-sm text-muted">Chrome profile → tài khoản Facebook → đích đăng. Không lưu mật khẩu. Không copy cookie.</p>
       <div className="mt-6 space-y-3">
         <div className="rounded-xl border border-border bg-surface p-4">
           <p className="text-xs text-subtle">Hồ sơ Chrome</p>
@@ -26,36 +40,111 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
           {snap.profile?.chromeDirectory ? <p className="text-xs text-muted">{snap.profile.chromeDirectory}</p> : null}
         </div>
         <div className="rounded-xl border border-border bg-surface p-4">
-          <p className="text-xs text-subtle">Thêm Trang Facebook thật</p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <input className="h-11 rounded-md border border-border px-3 text-sm" placeholder="Tên Trang" value={pageName} onChange={(e) => setPageName(e.target.value)} />
-            <input
-              className="h-11 rounded-md border border-border px-3 text-sm"
-              placeholder="https://www.facebook.com/ten-trang"
-              value={pageUrl}
-              onChange={(e) => setPageUrl(e.target.value)}
-            />
-          </div>
-          <button type="button" className="mt-2 h-11 rounded-md bg-accent px-4 text-sm text-accent-fg" onClick={() => api.addPage(pageName, pageUrl)}>
-            Thêm trang
-          </button>
+          <p className="text-xs text-subtle">Facebook Identity</p>
+          <p className="font-medium">{snap.identity?.displayName ?? "—"}</p>
+          <p className="text-xs text-muted">{snap.identity?.sessionStatus ?? "UNKNOWN"} · Trang cá nhân đang login</p>
         </div>
-        {snap.pages.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => api.selectPage(p.id)}
-            className={`flex w-full items-center justify-between rounded-xl border p-4 text-left ${
-              p.id === snap.selectedPageId ? "border-accent bg-info-bg" : "border-border bg-surface"
-            }`}
-          >
-            <span>
-              <span className="block font-medium">{p.name}</span>
-              <span className="text-xs text-muted">{p.url}</span>
-            </span>
-            {p.id === snap.selectedPageId ? <Check className="size-4" /> : null}
-          </button>
-        ))}
+
+        <p className="pt-2 text-xs font-medium uppercase tracking-wide text-subtle">Đích Facebook</p>
+        {snap.pages.map((p) => {
+          const kind = destType(p);
+          const on = p.id === snap.selectedPageId;
+          return (
+            <div
+              key={p.id}
+              className={`flex w-full items-center gap-3 rounded-xl border p-4 ${on ? "border-accent bg-info-bg" : "border-border bg-surface"}`}
+            >
+              <button type="button" onClick={() => api.selectPage(p.id)} className="min-w-0 flex-1 text-left">
+                <span className="block font-medium">
+                  {destGlyph(kind)} {p.name}
+                </span>
+                <span className="text-xs text-muted">
+                  {destKindLabel(kind)} · {p.status === "VERIFIED" ? "Ready" : p.status} · {p.url}
+                </span>
+              </button>
+              {on ? <Check className="size-4 shrink-0" /> : null}
+              <button type="button" className="shrink-0 text-muted hover:text-danger" onClick={() => api.removePage(p.id)} aria-label="Xóa đích">
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+          );
+        })}
+
+        {picker ? (
+          <div className="rounded-xl border border-accent bg-surface p-4">
+            <p className="text-sm font-medium">Thêm {destKindLabel(picker)}</p>
+            {picker === "PROFILE" ? (
+              <p className="mt-1 text-xs text-muted">Lấy từ phiên Facebook đang login. Không nhập mật khẩu.</p>
+            ) : picker === "GROUP" ? (
+              <p className="mt-1 text-xs text-muted">Dán URL facebook.com/groups/… Không coi group là fanpage.</p>
+            ) : (
+              <p className="mt-1 text-xs text-muted">Fanpage phải là URL page thật, không phải profile.php hay group.</p>
+            )}
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <input
+                className="h-11 rounded-md border border-border px-3 text-sm"
+                placeholder={picker === "GROUP" ? "Tên group" : picker === "PROFILE" ? "Tên hiển thị" : "Tên Fanpage"}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <input
+                className="h-11 rounded-md border border-border px-3 text-sm"
+                placeholder={
+                  picker === "GROUP"
+                    ? "https://www.facebook.com/groups/…"
+                    : picker === "PROFILE"
+                      ? "https://www.facebook.com/profile.php?id=…"
+                      : "https://www.facebook.com/ten-trang"
+                }
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {picker === "PROFILE" ? (
+                <button type="button" className="h-11 rounded-md bg-accent px-4 text-sm text-accent-fg" onClick={() => api.addProfileFromSession()}>
+                  Thêm từ phiên hiện tại
+                </button>
+              ) : null}
+              <button type="button" className="h-11 rounded-md bg-accent px-4 text-sm text-accent-fg" onClick={() => void submit()}>
+                Thêm {destKindLabel(picker)}
+              </button>
+              <button type="button" className="h-11 rounded-md border border-border px-4 text-sm" onClick={() => setPicker(null)}>
+                Hủy
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-border bg-surface p-4">
+            <p className="text-sm font-medium">+ Thêm đích Facebook</p>
+            <p className="mt-1 text-xs text-muted">Bạn muốn thêm loại nào?</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              {(["PROFILE", "PAGE", "GROUP"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className="h-16 rounded-md border border-border px-3 text-left text-sm hover:border-accent hover:bg-info-bg"
+                  onClick={() => {
+                    setPicker(t);
+                    setName("");
+                    setUrl(
+                      t === "GROUP"
+                        ? "https://www.facebook.com/groups/"
+                        : t === "PROFILE"
+                          ? "https://www.facebook.com/profile.php?id="
+                          : "https://www.facebook.com/",
+                    );
+                  }}
+                >
+                  <span className="block font-medium">
+                    {destGlyph(t)} {destKindLabel(t)}
+                  </span>
+                  <span className="text-xs text-muted">{t === "PAGE" ? "Facebook Page" : t === "GROUP" ? "Facebook Group" : "Facebook Profile"}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -103,7 +192,7 @@ export function HelpScreen() {
     ["1. Cài bản thật trên Windows", "Clone GitHub rồi chạy CAI-DAT-WINDOWS.bat. Preview web không gắn được Chrome của bạn."],
     ["2. Hồ sơ Chrome", "App tự quét User Data, chọn sẵn hồ sơ đã login Facebook, rồi kết nối CDP. Đóng hết Chrome nếu bị khóa hồ sơ."],
     ["3. Đăng nhập", "Nếu Facebook đã login, bước này tự xong. Nếu thấy màn login: login tay trên cửa sổ Chrome."],
-    ["4. Chọn Trang đích", "Dán URL Page Facebook thật sẽ nhận bài."],
+    ["4. Chọn đích đăng", "Tài khoản → Thêm đích: Trang cá nhân, Fanpage, hoặc Group. Không gộp 3 loại thành một «Trang»."],
     ["5. Soạn nháp", "Tạo bài đăng → Soạn bản nháp. Sửa chữ, thêm ảnh local. Chưa mở composer Facebook."],
     ["6. Duyệt & cho phép đăng", "Gửi duyệt → Duyệt & cho phép đăng. Chrome mới gõ bài và bấm Đăng."],
     ["7. Kết quả", "SUCCESS = đã ghi permalink. Cần kiểm tra kết quả = có thể đã lên — không đăng lại ngay."],

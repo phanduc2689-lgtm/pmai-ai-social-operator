@@ -1,4 +1,5 @@
 export * from "./browser.ts";
+export * from "./dest.ts";
 export * from "./engine.ts";
 export * from "./errors.ts";
 export * from "./hash.ts";

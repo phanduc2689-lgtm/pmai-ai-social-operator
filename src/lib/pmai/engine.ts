@@ -1,3 +1,4 @@
+import { destType, assertDestinationUrl } from "./dest.ts";
 import { FakeBrowserAdapter, hasComposerSideEffect, type BrowserAdapter } from "./browser.ts";
 import { PmaiError } from "./errors.ts";
 import { contentRevisionHash, newId, nowIso } from "./hash.ts";
@@ -15,6 +16,7 @@ import type {
   ContentItem,
   MediaAsset,
   PageTarget,
+  DestinationType,
   Task,
   VoiceProfile,
   WorkspaceState,
@@ -89,6 +91,10 @@ export class PmaiEngine {
             attach: m.attach !== false,
           })),
         })),
+        pages: (parsed.pages ?? []).map((p) => ({
+          ...p,
+          type: destType(p),
+        })),
       };
     } catch {
       /* ignore */
@@ -130,7 +136,7 @@ export class PmaiEngine {
     const l = this.lights();
     if (l.profile !== "RUNNING") return { ok: false, reason: "Cần hồ sơ trình duyệt đang chạy." };
     if (l.session !== "CONNECTED") return { ok: false, reason: "Cần đăng nhập Facebook trên đúng hồ sơ." };
-    if (l.page !== "VERIFIED") return { ok: false, reason: "Cần chọn và xác minh Trang đích." };
+    if (l.page !== "VERIFIED") return { ok: false, reason: "Cần chọn đích đăng (cá nhân / fanpage / group)." };
     if (!this.state.llm.hasKey && this.state.llm.provider !== "mock") {
       return { ok: false, reason: "Chưa kết nối AI. Mở Cài đặt hoặc dùng nhà cung cấp Demo." };
     }
@@ -183,17 +189,19 @@ export class PmaiEngine {
   }
 
   addPage(input: { name: string; url: string }) {
+    return this.addDestination({ type: "PAGE", name: input.name, url: input.url });
+  }
+
+  addDestination(input: { type: DestinationType; name: string; url: string }) {
     if (!this.state.identity) throw new PmaiError("NOT_READY", "Chưa đăng nhập Facebook.");
+    const type = input.type;
     const name = input.name.trim();
-    let url = input.url.trim();
-    if (!name) throw new PmaiError("SCHEMA_INVALID", "Cần tên Trang.");
-    if (!/^https:\/\/(www\.)?facebook\.com\/.+/i.test(url)) {
-      throw new PmaiError("SCHEMA_INVALID", "URL phải bắt đầu bằng https://www.facebook.com/");
-    }
-    url = url.replace(/\/$/, "");
-    const existing = this.state.pages.find((p) => p.url === url);
+    if (!name) throw new PmaiError("SCHEMA_INVALID", "Cần tên đích đăng.");
+    const url = assertDestinationUrl(type, input.url);
+    const existing = this.state.pages.find((p) => p.url === url || (destType(p) === type && p.name === name && p.url === url));
     if (existing) {
       existing.name = name;
+      existing.type = type;
       this.persist();
       return existing;
     }
@@ -203,9 +211,13 @@ export class PmaiEngine {
       name,
       url,
       status: "UNSELECTED",
+      type,
     };
     this.state.pages.push(page);
-    this.log("page.add", "OK", `${page.name} ${page.url}`);
+    if (type === "PROFILE" && !this.state.identity.profileUrl) {
+      this.state.identity.profileUrl = url;
+    }
+    this.log("destination.add", "OK", `${type} ${page.name} ${page.url}`);
     this.persist();
     return page;
   }
@@ -230,7 +242,7 @@ export class PmaiEngine {
     }));
     this.state.selectedPageId = pageId;
     this.state.firstRunStep = 4;
-    this.log("page.select", "OK", `${page.name} ${page.url}`);
+    this.log("destination.select", "OK", `${destType(page)} ${page.name} ${page.url}`);
     this.persist();
     return page;
   }
@@ -300,7 +312,7 @@ export class PmaiEngine {
     const gate = this.canCreatePost();
     if (!gate.ok) throw new PmaiError("NOT_READY", gate.reason);
     const page = this.selectedPage();
-    if (!page) throw new PmaiError("NOT_READY", "Chưa chọn trang.");
+    if (!page) throw new PmaiError("NOT_READY", "Chưa chọn đích đăng.");
     const samples = this.state.voice.enabled
       ? this.state.voice.samples.filter((s) => s.trim()).join("\n---\n")
       : "";
@@ -526,7 +538,7 @@ export class PmaiEngine {
     const a = this.state.approvals.find((x) => x.taskId === taskId);
     const c = this.requireContent(t.contentId);
     const page = this.state.pages.find((p) => p.id === t.pageTargetId);
-    if (!a || !page) throw new PmaiError("NOT_READY", "Thiếu approval hoặc trang.");
+    if (!a || !page) throw new PmaiError("NOT_READY", "Thiếu approval hoặc đích đăng.");
 
     assertPublishAllowed({
       approvalStatus: a.status,
@@ -566,6 +578,8 @@ export class PmaiEngine {
       if (obs0.pageState === "checkpoint") throw new PmaiError("CHECKPOINT", "Checkpoint — xử lý tay.");
       if (obs0.pageState === "login") throw new PmaiError("AUTH_LOGOUT", "Đã đăng xuất.");
 
+      this.log("publish.stage", "OK", "FACEBOOK_SESSION_VERIFIED", t.id);
+      this.log("publish.stage", "RUNNING", `DESTINATION_OPEN ${destType(page)}`, t.id);
       await adapter.goto(page.url);
       const obs1 = await adapter.observe();
       if (obs1.pageState === "login") throw new PmaiError("AUTH_LOGOUT", "Đã đăng xuất.");
@@ -574,13 +588,16 @@ export class PmaiEngine {
       const urlOk = urlsLooselyMatch(obs1.url, page.url);
       const nameOk = !obs1.pageName || namesLooselyMatch(obs1.pageName, page.name);
       if (!urlOk && !nameOk) {
-        throw new PmaiError("ACCOUNT_MISMATCH", "Sai Trang đích.");
+        throw new PmaiError("ACCOUNT_MISMATCH", `Sai đích đăng (${destType(page)}).`);
       }
       if (this.selectedPage()?.url !== page.url) {
-        throw new PmaiError("ACCOUNT_MISMATCH", "Sai URL trang.");
+        throw new PmaiError("ACCOUNT_MISMATCH", "Sai URL đích đã chọn.");
       }
+      this.log("publish.stage", "OK", "DESTINATION_OPENED", t.id);
 
+      this.log("publish.stage", "RUNNING", "COMPOSER_OPEN", t.id);
       await adapter.click({ name: "composer" });
+      this.log("publish.stage", "OK", "COMPOSER_OPENED", t.id);
       const caption = sanitizeComposerBody(c.body) || c.body;
       this.log("publish.stage", "OK", "CONTENT_READY", t.id);
       await adapter.type({ role: "textbox", name: "composer" }, caption);
@@ -599,12 +616,15 @@ export class PmaiEngine {
       const previewUrlOk = urlsLooselyMatch(preview.url, page.url);
       const previewNameOk = !preview.pageName || namesLooselyMatch(preview.pageName, page.name);
       if (!previewUrlOk && !previewNameOk) {
-        throw new PmaiError("PREVIEW_MISMATCH", "Preview sai trang.");
+        throw new PmaiError("PREVIEW_MISMATCH", "Preview sai đích đăng.");
       }
 
       this.log("publish.stage", "RUNNING", "PUBLISH_READY", t.id);
       try {
-        const published = await adapter.publish();
+        const published = await adapter.publish({
+          destinationType: destType(page),
+          hasMedia: files.length > 0,
+        });
         for (const s of published.stages ?? []) {
           this.log("publish.stage", s.ok ? "OK" : "FAIL", `${s.name}${s.detail ? ` · ${s.detail}` : ""}`, t.id);
         }
@@ -715,17 +735,27 @@ export function namesLooselyMatch(observed: string, expected: string): boolean {
 }
 
 export function urlsLooselyMatch(observed: string, expected: string): boolean {
-  const norm = (u: string) =>
-    u
-      .toLowerCase()
-      .replace(/\/$/, "")
-      .replace(/^https?:\/\/(www\.)?/, "")
-      .split("?")[0]
-      .split("#")[0];
-  const a = norm(observed);
-  const b = norm(expected);
-  if (!a || !b) return false;
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  const parse = (u: string) => {
+    const raw = String(u || "").trim();
+    try {
+      const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      const x = new URL(href);
+      const host = x.hostname.replace(/^www\./i, "").toLowerCase();
+      const path = (x.pathname || "/").replace(/\/$/, "").toLowerCase() || "/";
+      const id = x.searchParams.get("id") || "";
+      const group = path.match(/\/groups\/([^/]+)/)?.[1] || "";
+      return { host, path, id, group, key: `${host}${path}${id ? `?id=${id}` : ""}` };
+    } catch {
+      return { host: "", path: raw.toLowerCase().replace(/\/$/, ""), id: "", group: "", key: raw.toLowerCase().replace(/\/$/, "") };
+    }
+  };
+  const a = parse(observed);
+  const b = parse(expected);
+  if (!a.key || !b.key) return false;
+  if (a.group && b.group) return a.group === b.group;
+  if (a.id && b.id && a.path.includes("profile.php") && b.path.includes("profile.php")) return a.id === b.id;
+  if (a.key === b.key) return true;
+  return a.key.startsWith(`${b.key}/`) || b.key.startsWith(`${a.key}/`);
 }
 
 function defaultModel(p: LlmProvider): string {
@@ -751,6 +781,7 @@ function demoPages(identityId: string): PageTarget[] {
       name: "PM Travel Hà Giang",
       url: "https://www.facebook.com/pmtravelhagiang",
       status: "UNSELECTED",
+      type: "PAGE",
     },
     {
       id: newId("pg"),
@@ -758,6 +789,7 @@ function demoPages(identityId: string): PageTarget[] {
       name: "PM Travel Hàn Quốc",
       url: "https://www.facebook.com/pmtravelkorea",
       status: "UNSELECTED",
+      type: "PAGE",
     },
   ];
 }

@@ -280,8 +280,74 @@ describe("invariants", () => {
     assert.equal(isExactPublishName("Đăng"), true);
     assert.equal(isExactPublishName("Post"), true);
     assert.equal(isExactPublishName("Đăng ngay"), false);
+    assert.equal(isExactPublishName("Đăng ẩn danh"), false);
     assert.equal(isExactPublishName("Đăng\u00a0"), true);
     assert.equal(isExactNextName("Tiếp"), true);
     assert.equal(isExactNextName("Tiếp cận nhiều người hơn khi bạn chia sẻ bài viết trong các nhóm phù hợp."), false);
+  });
+});
+
+describe("destinations PROFILE / PAGE / GROUP", () => {
+  it("infers type from URL and keeps addPage as PAGE", async () => {
+    const { inferDestinationType, destType } = await import("./dest.ts");
+    assert.equal(inferDestinationType("https://www.facebook.com/profile.php?id=100080334108148"), "PROFILE");
+    assert.equal(inferDestinationType("https://www.facebook.com/groups/210264829953098"), "GROUP");
+    assert.equal(inferDestinationType("https://www.facebook.com/pmtravel"), "PAGE");
+    const e = primed();
+    await e.createProfile({ name: "P1", mode: "ATTACH_EXISTING" });
+    e.markLoggedIn("Nguyen Van", { seedDemo: false });
+    const page = e.addPage({ name: "PM Travel", url: "https://www.facebook.com/pmtravel/" });
+    assert.equal(destType(page), "PAGE");
+    const profile = e.addDestination({
+      type: "PROFILE",
+      name: "Nguyen Van",
+      url: "https://www.facebook.com/profile.php?id=100080334108148",
+    });
+    assert.equal(profile.type, "PROFILE");
+    const group = e.addDestination({
+      type: "GROUP",
+      name: "Hội yêu chó mèo Hà Nội",
+      url: "https://www.facebook.com/groups/210264829953098",
+    });
+    assert.equal(group.type, "GROUP");
+    assert.throws(() => e.addDestination({ type: "PAGE", name: "x", url: group.url }), PmaiError);
+    assert.throws(() => e.addDestination({ type: "GROUP", name: "x", url: page.url }), PmaiError);
+  });
+
+  it("does not mix profile.php ids and matches group ids", () => {
+    assert.equal(
+      urlsLooselyMatch(
+        "https://www.facebook.com/profile.php?id=1",
+        "https://www.facebook.com/profile.php?id=2",
+      ),
+      false,
+    );
+    assert.equal(
+      urlsLooselyMatch(
+        "https://www.facebook.com/groups/210264829953098/",
+        "https://www.facebook.com/groups/210264829953098",
+      ),
+      true,
+    );
+  });
+
+  it("publishes a group destination through the fake adapter after approval", async () => {
+    const e = primed();
+    await e.createProfile({ name: "P1", mode: "MANAGED_PROFILE" });
+    e.markLoggedIn("Hieu", { seedDemo: false });
+    const g = e.addDestination({
+      type: "GROUP",
+      name: "Hội yêu chó mèo Hà Nội",
+      url: "https://www.facebook.com/groups/210264829953098",
+    });
+    e.selectPage(g.id);
+    const draft = await e.createDraft("đăng group");
+    const { task, approval } = await e.submitForApproval(draft.id);
+    e.decideApproval(approval.id, "APPROVE");
+    const browser = new FakeBrowserAdapter({ pageName: g.name, pageUrl: g.url });
+    const done = await e.executeTask(task.id, browser);
+    assert.equal(done.status, "SUCCESS");
+    const pub = browser.calls.find((c) => c.method === "publish");
+    assert.equal((pub?.args[0] as { destinationType?: string })?.destinationType, "GROUP");
   });
 });

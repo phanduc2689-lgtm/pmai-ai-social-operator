@@ -413,8 +413,8 @@ function registerIpc() {
   handleOnce("chrome.click", wrap(async (payload) => adapter().clickNamed(payload.name)));
   handleOnce(
     "chrome.publish",
-    wrap(async () => {
-      if (typeof adapter().publishPost === "function") return adapter().publishPost();
+    wrap(async (payload) => {
+      if (typeof adapter().publishPost === "function") return adapter().publishPost(payload || {});
       return adapter().clickNamed("Đăng");
     }),
   );

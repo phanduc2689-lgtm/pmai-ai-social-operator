@@ -171,7 +171,16 @@ function PmaiShell() {
               ok={lights.session === "CONNECTED"}
               text={lights.session === "CONNECTED" ? (snap.identity?.displayName ?? "Đã login") : lights.session}
             />
-            <Light label="Trang đích" ok={lights.page === "VERIFIED"} text={snap.pages.find((p) => p.id === snap.selectedPageId)?.name ?? "Chưa chọn"} />
+            <Light
+              label="Đích"
+              ok={lights.page === "VERIFIED"}
+              text={(() => {
+                const d = snap.pages.find((p) => p.id === snap.selectedPageId);
+                if (!d) return "Chưa chọn";
+                const t = d.type === "PROFILE" ? "Cá nhân" : d.type === "GROUP" ? "Group" : /groups\//i.test(d.url) ? "Group" : /profile\.php/i.test(d.url) ? "Cá nhân" : "Fanpage";
+                return `${d.name} · ${t}`;
+              })()}
+            />
           </div>
         </header>
         <ChromeLiveBar />

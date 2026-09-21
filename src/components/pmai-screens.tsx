@@ -3,7 +3,8 @@ import { ImagePlus, Link2, Trash2 } from "lucide-react";
 import { hasElectronHost } from "@/lib/pmai/ipc.ts";
 import { attachedMedia, formatBytes } from "@/lib/pmai/media.ts";
 import { previewOf } from "@/lib/pmai/media-preview.ts";
-import type { MediaAsset } from "@/lib/pmai/types.ts";
+import { destGlyph, destKindLabel, destType, destinationsOf } from "@/lib/pmai/dest.ts";
+import type { DestinationType, MediaAsset } from "@/lib/pmai/types.ts";
 import type { usePmai } from "@/lib/pmai/use-pmai.ts";
 
 export function Dashboard({
@@ -229,7 +230,9 @@ export function Compose({
   const { snap, gate } = api;
   const [brief, setBrief] = useState("Tour Hà Giang mùa thu, 2 ngày 1 đêm");
   const draft = snap.contents.find((c) => c.id === draftId) ?? snap.contents[0];
-  const page = snap.pages.find((p) => p.id === snap.selectedPageId);
+  const selected = snap.pages.find((p) => p.id === snap.selectedPageId);
+  const [kind, setKind] = useState<DestinationType>(selected ? destType(selected) : "PAGE");
+  const options = destinationsOf(snap.pages, kind);
 
   return (
     <section className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-2">
@@ -238,7 +241,47 @@ export function Compose({
         <p className="mt-2 text-sm text-muted">
           AI soạn nháp local. Ảnh/video lưu path máy bạn. Chrome chỉ mở sau khi duyệt.
         </p>
-        <p className="mt-2 text-xs text-subtle">Trang đích: {page?.name ?? "—"}</p>
+        <div className="mt-4 rounded-xl border border-border bg-surface p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-subtle">Đăng lên</p>
+          <select
+            className="mt-2 h-11 w-full rounded-md border border-border bg-bg px-3 text-sm"
+            value={kind}
+            onChange={(e) => {
+              const next = e.target.value as DestinationType;
+              setKind(next);
+              const first = destinationsOf(snap.pages, next)[0];
+              if (first) void api.selectPage(first.id);
+            }}
+          >
+            <option value="PROFILE">👤 Trang cá nhân</option>
+            <option value="PAGE">📄 Fanpage</option>
+            <option value="GROUP">👥 Group</option>
+          </select>
+          <p className="mt-3 text-xs text-subtle">Đích</p>
+          {options.length ? (
+            <select
+              className="mt-1 h-11 w-full rounded-md border border-border bg-bg px-3 text-sm"
+              value={selected && destType(selected) === kind ? selected.id : ""}
+              onChange={(e) => void api.selectPage(e.target.value)}
+            >
+              <option value="" disabled>
+                Chọn {destKindLabel(kind)}
+              </option>
+              {options.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="mt-2 text-sm text-muted">Chưa có {destKindLabel(kind).toLowerCase()}. Thêm ở Tài khoản.</p>
+          )}
+          {selected && destType(selected) === kind ? (
+            <p className="mt-2 text-xs text-muted">
+              {destGlyph(kind)} {selected.name} · {destKindLabel(kind)}
+            </p>
+          ) : null}
+        </div>
         <textarea
           className="mt-4 min-h-32 w-full rounded-md border border-border bg-surface p-3 font-sans text-sm"
           value={brief}
@@ -328,13 +371,21 @@ export function Approve({ api }: { api: ReturnType<typeof usePmai> }) {
         {items.map((a) => {
           const c = snap.contents.find((x) => x.id === a.contentId);
           const t = snap.tasks.find((x) => x.id === a.taskId);
-          const page = snap.pages.find((p) => p.id === a.pageTargetId);
+          const dest = snap.pages.find((p) => p.id === a.pageTargetId);
+          const kind = destType(dest);
           const shots = c?.media.filter((m) => m.attach !== false) ?? [];
           return (
             <li key={a.id} className="rounded-xl border border-border bg-surface p-5 shadow-panel">
               <p className="text-xs text-subtle">
-                {page?.name} · {a.status} · hash {a.contentRevisionHash.slice(0, 8)}
+                {destGlyph(kind)} {destKindLabel(kind)} · {dest?.name} · {a.status} · hash {a.contentRevisionHash.slice(0, 8)}
               </p>
+              {kind === "PAGE" ? (
+                <p className="mt-1 text-xs text-muted">Đăng với tư cách Fanpage · tài khoản {snap.identity?.displayName ?? "—"}</p>
+              ) : kind === "GROUP" ? (
+                <p className="mt-1 text-xs text-muted">Đăng vào group bằng {snap.identity?.displayName ?? "—"} · không bật ẩn danh</p>
+              ) : (
+                <p className="mt-1 text-xs text-muted">Đăng lên trang cá nhân {dest?.name ?? snap.identity?.displayName}</p>
+              )}
               <p className="mt-3 whitespace-pre-wrap font-serif text-lg">{c?.body}</p>
               {shots.length ? (
                 <div className="mt-3 space-y-2">
