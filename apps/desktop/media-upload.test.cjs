@@ -8,6 +8,7 @@ const {
   pickVideoInputIndex,
   pickImageInputIndex,
   pickLastMatching,
+  pickBestMeta,
   detectKind,
   inspectComposerMediaPreview,
   clickComposerMediaToolbar,
@@ -82,6 +83,22 @@ describe("video vs photo file inputs", () => {
         "image",
       ),
       2,
+    );
+  });
+
+  it("video can still use the Ảnh/video image input as last resort (setInputFiles ignores accept)", () => {
+    const meta = pickBestMeta([{ index: 0, accept: PHOTO_ACCEPT, frame: 0 }], "video");
+    assert.ok(meta);
+    assert.equal(meta.index, 0);
+    assert.equal(
+      pickLastMatching(
+        [
+          { index: 0, accept: PHOTO_ACCEPT },
+          { index: 1, accept: VIDEO_ACCEPT },
+        ],
+        "video",
+      ),
+      1,
     );
   });
 });

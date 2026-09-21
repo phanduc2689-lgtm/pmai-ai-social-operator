@@ -1,3 +1,11 @@
+# PMAI 1.2.4 — 2026-09-21
+
+Sửa **không gắn được ảnh/video trong modal Tạo bài viết**.
+
+- Bấm «Ảnh/video» trên toàn trang (không chỉ role=dialog).
+- `setInputFiles` vào input ẩn kể cả khi `accept` chỉ có ảnh (Playwright không mở hộp Open Windows).
+- Video không còn bị loại chỉ vì picker Facebook là image-only.
+
 # PMAI 1.2.3 — 2026-09-21
 
 Bài kèm ảnh/video: **gắn media trước**, điền caption sau, rồi mới Đăng.
