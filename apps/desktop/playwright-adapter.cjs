@@ -25,16 +25,37 @@ function err(code, message) {
   return e;
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isComposerCue(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (/tạo nhóm mới|create (a )?new group|đăng ẩn danh|post anonymously/i.test(t)) return false;
+  return /bạn đang nghĩ gì|bạn viết gì đi|viết gì đó|tạo bài viết|tạo bài viết công khai|write something|write a post|what['’`]?s on your mind|create a post|create a public post|start a discussion|share your thoughts|chia sẻ suy nghĩ|đăng bài viết|bắt đầu thảo luận/i.test(
+    t,
+  );
+}
+
 function anyDialog(page) {
   return page.locator('[role="dialog"], [aria-modal="true"]');
 }
 
 function composerOpeners(page) {
+  const main = page.locator('[role="main"]');
+  const cue =
+    /bạn đang nghĩ gì|bạn viết gì đi|viết gì đó|write something|write a post|what.?s on your mind|tạo bài viết|create a post|create a public post|start a discussion|chia sẻ suy nghĩ|share your thoughts|đăng bài viết|bắt đầu thảo luận/i;
   return [
-    page.getByRole("button", { name: /tạo bài viết|create a post|viết bài/i }).first(),
-    page.getByText(/bạn đang nghĩ gì|what.?s on your mind/i).first(),
-    page.getByText(/bạn viết gì đi|write something/i).first(),
-    page.locator('[aria-label*="Tạo bài" i], [aria-label*="Create a post" i], [aria-label*="Create post" i]').first(),
+    page.getByRole("button", { name: /tạo bài viết|create a post|create a public post|đăng bài viết/i }).first(),
+    page.getByPlaceholder(cue).first(),
+    page.getByLabel(cue).first(),
+    page.locator("[aria-placeholder]").filter({ hasText: cue }).first(),
+    page.getByText(cue).first(),
+    main.getByText(cue).first(),
+    main.locator('[role="button"]').filter({ hasText: cue }).first(),
+    page.locator('[aria-label*="Tạo bài" i], [aria-label*="Create a post" i], [aria-label*="Create post" i], [aria-label*="Write something" i]').first(),
+    page.locator('[contenteditable="true"]').first(),
   ];
 }
 
@@ -74,12 +95,16 @@ function genericLocators(page, name) {
 }
 
 async function firstVisible(candidates, timeout = 2000) {
-  for (const loc of candidates) {
-    try {
-      if (await loc.isVisible({ timeout })) return loc;
-    } catch {
-      /* next */
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    for (const loc of candidates) {
+      try {
+        if (await loc.isVisible({ timeout: 120 })) return loc;
+      } catch {
+        /* next */
+      }
     }
+    await sleep(180);
   }
   return null;
 }
@@ -272,26 +297,92 @@ async function autoConnect(opts = {}) {
 
 async function goto(url) {
   await live.page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await sleep(1000);
+  try {
+    await live.page.locator('[role="main"]').first().waitFor({ state: "visible", timeout: 12000 });
+  } catch {
+    /* group/page chrome still hydrating */
+  }
+  await sleep(700);
   return observe();
 }
 
+async function composerReady(page) {
+  if (await anyDialog(page).first().isVisible().catch(() => false)) return true;
+  const editors = page.locator(
+    '[role="dialog"] [contenteditable="true"], [aria-modal="true"] [contenteditable="true"], [role="dialog"] [data-lexical-editor="true"]',
+  );
+  if (await editors.first().isVisible().catch(() => false)) return true;
+  return false;
+}
+
+async function clickComposerInPage(page) {
+  const payload = {
+    cue: "bạn đang nghĩ gì|bạn viết gì đi|viết gì đó|write something|write a post|what['’`]?s on your mind|create a post|create a public post|start a discussion|tạo bài viết|chia sẻ suy nghĩ|share your thoughts|đăng bài viết|bắt đầu thảo luận",
+    skip: "tạo nhóm mới|create (a )?new group|đăng ẩn danh",
+  };
+  for (const frame of typeof page.frames === "function" ? page.frames() : [page]) {
+    try {
+      const result = await frame.evaluate(({ cue: cueSrc, skip: skipSrc }) => {
+        const cue = new RegExp(cueSrc, "i");
+        const skip = new RegExp(skipSrc, "i");
+        const nodes = [...document.querySelectorAll('[role="button"], [role="textbox"], [contenteditable="true"], div[tabindex="0"], span, a')];
+        let best = null;
+        let bestArea = 0;
+        for (const el of nodes) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 48 || r.height < 14 || r.bottom < 80 || r.top > innerHeight - 20) continue;
+          const st = window.getComputedStyle(el);
+          if (st.display === "none" || st.visibility === "hidden" || Number(st.opacity) === 0) continue;
+          const aria = el.getAttribute("aria-label") || el.getAttribute("aria-placeholder") || el.getAttribute("placeholder") || "";
+          const text = (el.innerText || "").replace(/\s+/g, " ").trim();
+          const blob = `${aria} ${text}`;
+          if (skip.test(blob)) continue;
+          if (!cue.test(blob)) continue;
+          if (text.length > 90 && !cue.test(aria)) continue;
+          const area = r.width * r.height;
+          if (area > bestArea) {
+            bestArea = area;
+            best = el;
+          }
+        }
+        if (!best) return { ok: false };
+        best.click();
+        return { ok: true, text: (best.innerText || best.getAttribute("aria-label") || "").slice(0, 60) };
+      }, payload);
+      if (result && result.ok) return true;
+    } catch {
+      /* cross-origin */
+    }
+  }
+  return false;
+}
+
 async function ensureComposerOpen() {
-  const already = await anyDialog(live.page)
-    .first()
-    .isVisible()
-    .catch(() => false);
-  if (already) return;
-  const opener = await firstVisible(composerOpeners(live.page), 2500);
-  if (!opener) throw err("UI_CHANGED", "Không thấy ô soạn «Bạn đang nghĩ gì?» / «Bạn viết gì đi…» / Tạo bài viết.");
-  await safeClick(opener);
+  if (await composerReady(live.page)) return;
+
+  const join = live.page.getByRole("button", { name: /tham gia nhóm|join group|join this group/i }).first();
+  if (await join.isVisible().catch(() => false)) {
+    throw err("NOT_READY", "Group chưa tham gia / không có quyền đăng. Mở group trên Chrome, tham gia, rồi duyệt lại.");
+  }
+
+  const opener = await firstVisible(composerOpeners(live.page), 14000);
+  if (opener) {
+    await safeClick(opener);
+  } else {
+    const clicked = await clickComposerInPage(live.page);
+    if (!clicked) {
+      throw err(
+        "UI_CHANGED",
+        "Không thấy ô soạn trên trang đích (Bạn đang nghĩ gì? / Write something / Tạo bài viết). Cuộn feed group/profile rồi thử lại.",
+      );
+    }
+  }
+
   const start = Date.now();
-  while (Date.now() - start < 8000) {
-    const vis = await anyDialog(live.page)
-      .first()
-      .isVisible()
-      .catch(() => false);
-    if (vis) return;
-    await new Promise((r) => setTimeout(r, 300));
+  while (Date.now() - start < 12000) {
+    if (await composerReady(live.page)) return;
+    await sleep(300);
   }
 }
 
@@ -370,4 +461,5 @@ module.exports = {
   screenshotPng,
   closeBrowser,
   isCdpUp,
+  isComposerCue,
 };

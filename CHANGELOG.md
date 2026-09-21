@@ -1,3 +1,12 @@
+# PMAI 1.2.1 — 2026-09-21
+
+Sửa **không mở được composer** trên group/profile (lỗi `Không thấy ô soạn Bạn đang nghĩ gì`).
+
+- Chờ feed Facebook hydrate sau khi mở URL.
+- Nhận cả placeholder tiếng Anh (Write something / Create a public post) và tiếng Việt.
+- Không bấm nhầm «Tạo nhóm mới» / «Đăng ẩn danh».
+- Fanpage Tiếp → Đăng giữ nguyên.
+
 # PMAI 1.2.0 — 2026-09-21
 
 Mở rộng đích đăng Facebook: **Trang cá nhân + Fanpage + Group**.
