@@ -1,3 +1,17 @@
+# PMAI 2.0.0 — 2026-09-22
+
+**Baseline đối chiếu.** Bản này đã làm đúng yêu cầu — khóa để so sánh các commit sau.
+
+Đã chốt:
+- Luồng đăng PROFILE / PAGE / GROUP (locator freeze).
+- Delay người thật 10–15s giữa các bước đăng.
+- Sau nhật ký SUCCESS: chờ 5s rồi về trang chủ Facebook. Còn bước tiếp theo thì không về.
+- Không gian làm việc nhiều session Chrome song song (mỗi session = 1 tài khoản Facebook).
+- Nhận Facebook đã login đúng cửa sổ session.
+- Media preview `hasComposerMediaPreview` trong dist-main.
+
+Không đụng locator đã freeze khi sửa tiếp.
+
 # PMAI 1.3.3 — 2026-09-22
 
 Luồng đăng bị gãy: `media.hasComposerMediaPreview is not a function` — Electron chạy bản media-upload cũ trong dist-main.
