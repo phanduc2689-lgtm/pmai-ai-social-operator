@@ -1,3 +1,10 @@
+# PMAI 1.2.5 — 2026-09-22
+
+Ảnh **đã hiện trong modal** (nút «Chỉnh sửa») nhưng PMAI báo chưa thấy ảnh nên **không gõ caption**.
+
+- Nhận thumbnail Facebook: overlay «Chỉnh sửa», «Thêm ảnh bìa», ảnh nền — không chỉ `<img>` 72px.
+- Có preview thì mới điền caption rồi Đăng.
+
 # PMAI 1.2.4 — 2026-09-21
 
 Sửa **không gắn được ảnh/video trong modal Tạo bài viết**.

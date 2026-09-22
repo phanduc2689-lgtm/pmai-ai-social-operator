@@ -148,6 +148,27 @@ describe("composer media preview", () => {
     });
   });
 
+  it("treats Facebook «Chỉnh sửa» overlay as media attached even without a large <img>", async () => {
+    await withChromium(async (browser) => {
+      const page = await browser.newPage();
+      await page.setContent(`<!doctype html>
+<html lang="vi"><body>
+  <div>Chỉnh sửa trang cá nhân</div>
+  <div role="dialog" aria-modal="true" style="width:500px;height:640px;background:#fff">
+    <h2>Tạo bài viết</h2>
+    <img alt="avatar" width="40" height="40" style="width:40px;height:40px" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">
+    <div contenteditable="true">Bạn đang nghĩ gì?</div>
+    <div style="width:420px;height:280px;background-image:url('https://lookaside.fbsbx.com/x.jpg');background-size:cover">
+      <span>Chỉnh sửa</span>
+    </div>
+    <div>Thêm vào bài viết của bạn</div>
+    <div role="button">Đăng</div>
+  </div>
+</body></html>`);
+      assert.equal(await page.evaluate(inspectComposerMediaPreview), true);
+    });
+  });
+
   it("clicks Ảnh/video in Tạo bài viết, not the page cover picker", async () => {
     await withChromium(async (browser) => {
       const page = await browser.newPage();

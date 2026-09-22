@@ -241,6 +241,7 @@ async function waitForVideoAttached(page, timeoutMs) {
     }
     const videoEl = await dialog.locator("video").first().isVisible().catch(() => false);
     if (videoEl) return;
+    if (await page.getByText("Chỉnh sửa", { exact: true }).first().isVisible().catch(() => false)) return;
     const processing = await dialog
       .getByText(/đang tải|uploading|đang xử lý|processing|đang đăng video|upload in progress/i)
       .first()
@@ -520,55 +521,72 @@ function pickImageInputIndex(metas) {
 
 /** True when composer shows an attached photo/video, ignoring 32–48px avatars. */
 function inspectComposerMediaPreview() {
-  const roots = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"], [role="sheet"]')];
-  const heading = [...document.querySelectorAll("h1,h2,h3,h4,[role='heading']")].find((el) => {
-    const n = String(el.textContent || "")
+  const headingHit = [...document.querySelectorAll("h1,h2,h3,h4,[role='heading'],span,div")].find((el) => {
+    const n = String(el.childNodes.length ? [...el.childNodes].map((c) => (c.nodeType === 3 ? c.textContent : "")).join("") : el.textContent || "")
       .replace(/\s+/g, " ")
       .trim();
+    const short = n.length && n.length < 40 ? n : String(el.textContent || "").replace(/\s+/g, " ").trim();
+    const label = short.length < 40 ? short : "";
     return (
-      n === "Tạo bài viết" ||
-      n === "Create post" ||
-      n === "Create a post" ||
-      n === "Cài đặt bài viết" ||
-      n === "Post settings"
+      label === "Tạo bài viết" ||
+      label === "Create post" ||
+      label === "Create a post" ||
+      label === "Cài đặt bài viết" ||
+      label === "Post settings"
     );
   });
-  let scope = roots.length ? roots[roots.length - 1] : document.body;
-  if (heading) {
-    let p = heading.parentElement;
+
+  const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"], [role="sheet"]')];
+  let scope = dialogs.length ? dialogs[dialogs.length - 1] : document.body;
+  if (headingHit) {
+    let best = headingHit.parentElement || scope;
+    let p = headingHit.parentElement;
     while (p && p !== document.documentElement) {
-      if (p.querySelector && p.querySelector("img, video, [contenteditable='true']")) {
-        scope = p;
+      const r = p.getBoundingClientRect();
+      if (r.width >= 280 && r.height >= 280 && r.width <= innerWidth + 40) best = p;
+      if (p.getAttribute("role") === "dialog" || p.getAttribute("aria-modal") === "true") {
+        best = p;
         break;
       }
       p = p.parentElement;
     }
+    scope = best || scope;
   }
 
-  const avatarish = (el) => {
+  const visibleBox = (el, minW, minH) => {
     const r = el.getBoundingClientRect();
-    if (r.width < 72 || r.height < 72) return true;
-    const label = String(el.getAttribute("alt") || el.getAttribute("aria-label") || "").toLowerCase();
-    return /avatar|profile picture|ảnh đại diện|user profile/.test(label);
+    return r.width >= minW && r.height >= minH && r.bottom > 0 && r.top < innerHeight;
   };
 
-  for (const el of scope.querySelectorAll("img, video")) {
-    if (avatarish(el)) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width >= 72 && r.height >= 72 && r.bottom > 0 && r.top < innerHeight) return true;
-  }
-  for (const el of scope.querySelectorAll("[aria-label]")) {
-    if (/gỡ|remove photo|remove video|xóa ảnh|xóa video|remove attachment/i.test(el.getAttribute("aria-label") || "")) {
-      const r = el.getBoundingClientRect();
-      if (r.width > 8 && r.height > 8) return true;
+  for (const el of scope.querySelectorAll("span,div,button,[role='button'],a")) {
+    const t = String(el.innerText || el.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (t === "Chỉnh sửa" || t === "Edit" || t === "Thêm ảnh bìa" || t === "Add cover") {
+      if (visibleBox(el, 8, 8)) return true;
     }
   }
-  for (const el of scope.querySelectorAll("div")) {
-    const bg = window.getComputedStyle(el).backgroundImage || "";
-    if (!/url\(/.test(bg)) continue;
-    if (!/blob:|fbcdn|scontent/i.test(bg)) continue;
+
+  for (const el of scope.querySelectorAll("[aria-label]")) {
+    const aria = el.getAttribute("aria-label") || "";
+    if (/gỡ|remove photo|remove video|xóa ảnh|xóa video|remove attachment|chỉnh sửa|add cover|thêm ảnh bìa/i.test(aria)) {
+      if (visibleBox(el, 8, 8)) return true;
+    }
+  }
+
+  for (const el of scope.querySelectorAll("img, video, [role='img']")) {
     const r = el.getBoundingClientRect();
-    if (r.width >= 120 && r.height >= 80) return true;
+    const label = String(el.getAttribute("alt") || el.getAttribute("aria-label") || "").toLowerCase();
+    if (/avatar|profile picture|ảnh đại diện|user profile/.test(label)) continue;
+    if (r.width >= 72 && r.height >= 72 && r.bottom > 0 && r.top < innerHeight) return true;
+    const parent = el.parentElement;
+    if (parent && visibleBox(parent, 120, 80) && r.width >= 1) return true;
+  }
+
+  for (const el of scope.querySelectorAll("div,span")) {
+    const bg = window.getComputedStyle(el).backgroundImage || "";
+    if (!/url\(/i.test(bg)) continue;
+    if (visibleBox(el, 120, 80)) return true;
   }
   return false;
 }
@@ -583,10 +601,15 @@ async function hasComposerMediaPreview(page) {
 
 async function waitForImageAttached(page, timeoutMs) {
   const deadline = Date.now() + (timeoutMs || 25000);
+  const cues = page
+    .getByText("Chỉnh sửa", { exact: true })
+    .or(page.getByText("Thêm ảnh bìa", { exact: true }))
+    .or(page.getByText("Edit", { exact: true }))
+    .or(page.getByText("Add cover", { exact: true }));
   while (Date.now() < deadline) {
     if (await hasComposerMediaPreview(page)) return;
+    if (await cues.first().isVisible().catch(() => false)) return;
     const processing = await page
-      .locator('[role="dialog"], [aria-modal="true"]')
       .getByText(/đang tải|uploading|đang xử lý|processing/i)
       .first()
       .isVisible()
@@ -595,7 +618,7 @@ async function waitForImageAttached(page, timeoutMs) {
       await sleep(400);
       continue;
     }
-    await sleep(350);
+    await sleep(300);
   }
   throw err(
     "NOT_READY",
