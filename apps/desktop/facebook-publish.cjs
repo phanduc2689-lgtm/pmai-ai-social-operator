@@ -668,6 +668,26 @@ async function publishDirectComposer(page, opts = {}) {
   return { ok: true, stage: "PUBLISHED", stages };
 }
 
+function reelPauseMs(opts) {
+  if (typeof opts.humanPauseMs === "number") return Math.max(0, opts.humanPauseMs);
+  return 15000 + Math.floor(Math.random() * 5000);
+}
+
+async function humanPause(page, mark, ms, reason) {
+  if (!ms) return;
+  mark("HUMAN_PAUSE", true, `${Math.round(ms / 1000)}s · ${reason}`);
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (await hasPageMessengerCtaPopup(page)) {
+      const gone = await dismissPageComposerPrompts(page, 8000);
+      if (gone) mark("PAGE_CTA_DISMISSED", true, reason);
+    }
+    const left = ms - (Date.now() - start);
+    if (left <= 0) break;
+    await sleep(Math.min(400, left));
+  }
+}
+
 async function publishPageComposer(page, opts = {}) {
   const stages = [];
   const mark = (name, ok = true, detail = "") => {
@@ -678,6 +698,8 @@ async function publishPageComposer(page, opts = {}) {
     e.stages = stages;
     return e;
   };
+  let reelFlow = Boolean(opts.hasVideo);
+  const pauseMs = () => (reelFlow ? reelPauseMs(opts) : 0);
 
   if (opts.hasMedia) {
     const preview = await waitMediaPreview(page, 20000);
@@ -687,23 +709,28 @@ async function publishPageComposer(page, opts = {}) {
 
   let stage = await detectStage(page);
   mark("COMPOSER_STAGE", true, stage);
+  if (stage === "REEL_EDITOR" || stage === "REEL_SETTINGS") reelFlow = true;
 
   if (stage !== "POST_SETTINGS" && stage !== "REEL_SETTINGS") {
     const nextOk = await clickComposerNext(page);
     if (!nextOk) throw fail("UI_CHANGED", "Không thấy nút Tiếp trên modal Tạo bài viết.");
     mark("NEXT_CLICKED");
-    const skippedOnNext = await dismissPageComposerPrompts(page, 2000);
+    await humanPause(page, mark, pauseMs(), "sau Tiếp");
+    const skippedOnNext = await dismissPageComposerPrompts(page, reelFlow ? 8000 : 2000);
     if (skippedOnNext) mark("PAGE_CTA_DISMISSED", true, "sau Tiếp");
     const after = await waitAnyStage(page, ["POST_SETTINGS", "REEL_EDITOR", "REEL_SETTINGS"], 20000);
     if (!after) {
       throw fail("UI_CHANGED", "Đã bấm Tiếp nhưng chưa thấy Cài đặt bài viết / Chỉnh sửa thước phim.");
     }
+    if (after === "REEL_EDITOR" || after === "REEL_SETTINGS") reelFlow = true;
     if (after === "REEL_EDITOR") {
       mark("REEL_EDITOR_OPEN");
+      await humanPause(page, mark, pauseMs(), "Chỉnh sửa thước phim");
       const reelNext = await clickComposerNext(page);
       if (!reelNext) throw fail("UI_CHANGED", "Không thấy nút Tiếp trên Chỉnh sửa thước phim.");
       mark("REEL_NEXT_CLICKED");
-      const skippedOnReel = await dismissPageComposerPrompts(page, 2000);
+      await humanPause(page, mark, pauseMs(), "sau Tiếp thước phim");
+      const skippedOnReel = await dismissPageComposerPrompts(page, 8000);
       if (skippedOnReel) mark("PAGE_CTA_DISMISSED", true, "sau Tiếp thước phim");
       const settings = await waitAnyStage(page, ["REEL_SETTINGS", "POST_SETTINGS"], 20000);
       if (!settings) throw fail("UI_CHANGED", "Đã bấm Tiếp trên thước phim nhưng chưa thấy Cài đặt thước phim.");
@@ -715,14 +742,15 @@ async function publishPageComposer(page, opts = {}) {
     mark("POST_SETTINGS_OPEN", true, "đã mở sẵn");
   }
 
-  const skippedCta = await dismissPageComposerPrompts(page, 3500);
+  if (reelFlow) await humanPause(page, mark, pauseMs(), "Cài đặt thước phim");
+  const skippedCta = await dismissPageComposerPrompts(page, reelFlow ? 8000 : 3500);
   if (skippedCta) mark("PAGE_CTA_DISMISSED", true, "Lúc khác");
 
   mark("PUBLISH_READY");
 
   let found = await clickExactPublish(page);
   if (!found) {
-    await dismissPageComposerPrompts(page, 2000);
+    await dismissPageComposerPrompts(page, reelFlow ? 8000 : 2000);
     found = await clickExactPublish(page);
   }
   if (!found) {
@@ -734,7 +762,7 @@ async function publishPageComposer(page, opts = {}) {
   mark("PUBLISH_BUTTON_FOUND");
   mark("PUBLISH_CLICKED");
 
-  const settled = await settlePagePublishAfterClick(page, mark);
+  const settled = await settlePagePublishAfterClick(page, mark, { reel: reelFlow, humanPauseMs: pauseMs() });
   mark("PUBLISH_PROCESSING", settled, settled ? "modal đóng" : "modal còn mở");
 
   const ok = settled || (await verifyPublished(page));
@@ -743,10 +771,48 @@ async function publishPageComposer(page, opts = {}) {
   return { ok: true, stage: "PUBLISHED", stages };
 }
 
-async function settlePagePublishAfterClick(page, mark) {
+async function settlePagePublishAfterClick(page, mark, opts = {}) {
+  const reel = Boolean(opts.reel);
+  const pause = reel ? (typeof opts.humanPauseMs === "number" ? opts.humanPauseMs : reelPauseMs(opts)) : 0;
+  let dismissedOnce = false;
+
+  if (reel) {
+    await humanPause(page, mark, pause, "sau Đăng thước phim");
+    if (await hasPageMessengerCtaPopup(page)) {
+      const gone = await dismissPageComposerPrompts(page, 8000);
+      if (gone && !dismissedOnce) {
+        mark("PAGE_CTA_DISMISSED", true, "Lúc khác sau Đăng");
+        dismissedOnce = true;
+      }
+    }
+    if (await verifyPublished(page)) return true;
+    await humanPause(page, mark, pause, "chờ popup thước phim");
+    if (await hasPageMessengerCtaPopup(page)) {
+      const gone = await dismissPageComposerPrompts(page, 8000);
+      if (gone && !dismissedOnce) {
+        mark("PAGE_CTA_DISMISSED", true, "Lúc khác sau Đăng");
+        dismissedOnce = true;
+      }
+    }
+    if (await verifyPublished(page)) return true;
+    if (!(await hasPageMessengerCtaPopup(page))) {
+      const again = await clickExactPublish(page);
+      if (again) mark("PUBLISH_CLICKED", true, "click lần 2");
+    } else {
+      const gone = await dismissPageComposerPrompts(page, 8000);
+      if (gone && !dismissedOnce) {
+        mark("PAGE_CTA_DISMISSED", true, "Lúc khác sau Đăng");
+        dismissedOnce = true;
+      }
+      const again = await clickExactPublish(page);
+      if (again) mark("PUBLISH_CLICKED", true, "click lần 2");
+    }
+    await humanPause(page, mark, pause, "chờ bài thước phim lên");
+    return verifyPublished(page);
+  }
+
   const start = Date.now();
   let extraClicks = 0;
-  let dismissedOnce = false;
   await sleep(400);
   while (Date.now() - start < 28000) {
     if (await hasPageMessengerCtaPopup(page)) {

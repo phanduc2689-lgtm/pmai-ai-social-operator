@@ -1,3 +1,11 @@
+# PMAI 1.2.11 — 2026-09-22
+
+Chỉ **Fanpage + video**. Ảnh Fanpage / Profile / Group không đổi.
+
+- Mỗi bước thước phim chờ **15–20 giây** (giống người): sau Tiếp, trên Chỉnh sửa thước phim, Cài đặt thước phim, sau Đăng.
+- Trong lúc chờ: nếu có popup Chat trực tiếp thì bấm Lúc khác / X / Escape.
+- Không spam Đăng 4 lần khi popup đang mở.
+
 # PMAI 1.2.10 — 2026-09-22
 
 Fanpage popup «Chat trực tiếp với khách hàng»: Facebook React **không nhận** `element.click()`. Log cũ «Lúc khác sau Đăng» lặp 13 lần nhưng popup vẫn còn.

@@ -52,7 +52,7 @@ export class HostBrowserAdapter implements BrowserAdapter {
     this.calls.push({ method: "click", args: [target] });
     await this.call("chrome.click", { name: target.name });
   }
-  async publish(opts?: { destinationType?: import("./types.ts").DestinationType; hasMedia?: boolean }) {
+  async publish(opts?: { destinationType?: import("./types.ts").DestinationType; hasMedia?: boolean; hasVideo?: boolean }) {
     this.calls.push({ method: "publish", args: [opts ?? {}] });
     return this.call<PublishResult>("chrome.publish", opts ?? {});
   }

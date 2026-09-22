@@ -426,6 +426,7 @@ async function publishPost(opts = {}) {
   const fbPublish = require("./facebook-publish.cjs");
   return fbPublish.publishFromComposer(live.page, {
     hasMedia: opts.hasMedia !== false,
+    hasVideo: Boolean(opts.hasVideo),
     destinationType: opts.destinationType || "PAGE",
   });
 }

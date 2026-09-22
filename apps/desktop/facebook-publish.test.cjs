@@ -251,7 +251,12 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
     bind();
   </script>
 </body></html>`);
-      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE" });
+      const result = await publishFromComposer(page, {
+        hasMedia: false,
+        destinationType: "PAGE",
+        hasVideo: true,
+        humanPauseMs: 0,
+      });
       assert.equal(result.ok, true);
       assert.deepEqual(await page.evaluate(() => window.__steps), ["composer-next", "reel-next", "publish"]);
     });
@@ -289,7 +294,7 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
     });
   </script>
 </body></html>`);
-      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE" });
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE", humanPauseMs: 0 });
       assert.equal(result.ok, true);
       assert.equal(await page.evaluate(() => window.__cta), "publish");
     });

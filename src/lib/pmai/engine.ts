@@ -624,6 +624,7 @@ export class PmaiEngine {
         const published = await adapter.publish({
           destinationType: destType(page),
           hasMedia: files.length > 0,
+          hasVideo: files.some((f) => /\.(mp4|mov|webm|m4v)$/i.test(f)),
         });
         for (const s of published.stages ?? []) {
           this.log("publish.stage", s.ok ? "OK" : "FAIL", `${s.name}${s.detail ? ` · ${s.detail}` : ""}`, t.id);
