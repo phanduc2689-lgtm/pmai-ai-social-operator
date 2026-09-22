@@ -314,6 +314,18 @@ describe("destinations PROFILE / PAGE / GROUP", () => {
     assert.equal(group.type, "GROUP");
     assert.throws(() => e.addDestination({ type: "PAGE", name: "x", url: group.url }), PmaiError);
     assert.throws(() => e.addDestination({ type: "GROUP", name: "x", url: page.url }), PmaiError);
+    const newStylePage = e.addDestination({
+      type: "PAGE",
+      name: "Do Tu Quynh Fanpage",
+      url: "https://www.facebook.com/profile.php?id=100072265695763",
+    });
+    assert.equal(newStylePage.type, "PAGE");
+    const namedPage = e.addDestination({
+      type: "PAGE",
+      name: "Tien Nghich Fanpage",
+      url: "https://www.facebook.com/tiennghich.officialfanpage",
+    });
+    assert.equal(namedPage.type, "PAGE");
   });
 
   it("does not mix profile.php ids and matches group ids", () => {

@@ -1,3 +1,8 @@
+# PMAI 1.2.6 — 2026-09-22
+
+- **Khóa** luồng đăng Trang cá nhân và Group (chữ / ảnh / video) — không sửa thêm.
+- Fanpage: nhận cả URL doanh nghiệp (`facebook.com/ten-trang`) và fanpage cá nhân (`profile.php?id=…`). Chỉ chặn URL group.
+
 # PMAI 1.2.5 — 2026-09-22
 
 Ảnh **đã hiện trong modal** (nút «Chỉnh sửa») nhưng PMAI báo chưa thấy ảnh nên **không gõ caption**.

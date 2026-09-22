@@ -48,9 +48,6 @@ export function assertDestinationUrl(type: DestinationType, url: string): string
   if (type === "PAGE" && inferred === "GROUP") {
     throw new PmaiError("SCHEMA_INVALID", "Đây là Group. Chọn loại Group, không phải Fanpage.");
   }
-  if (type === "PAGE" && inferred === "PROFILE") {
-    throw new PmaiError("SCHEMA_INVALID", "Đây là trang cá nhân. Chọn loại Trang cá nhân.");
-  }
   if (type === "PROFILE" && inferred === "GROUP") {
     throw new PmaiError("SCHEMA_INVALID", "Đây là Group, không phải trang cá nhân.");
   }

@@ -78,7 +78,9 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
             ) : picker === "GROUP" ? (
               <p className="mt-1 text-xs text-muted">Dán URL facebook.com/groups/… Không coi group là fanpage.</p>
             ) : (
-              <p className="mt-1 text-xs text-muted">Fanpage phải là URL page thật, không phải profile.php hay group.</p>
+              <p className="mt-1 text-xs text-muted">
+                Fanpage cá nhân hoặc doanh nghiệp: facebook.com/ten-trang hoặc profile.php?id=… Không dùng URL group.
+              </p>
             )}
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <input
@@ -94,7 +96,7 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
                     ? "https://www.facebook.com/groups/…"
                     : picker === "PROFILE"
                       ? "https://www.facebook.com/profile.php?id=…"
-                      : "https://www.facebook.com/ten-trang"
+                      : "https://www.facebook.com/ten-trang hoặc profile.php?id=…"
                 }
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
