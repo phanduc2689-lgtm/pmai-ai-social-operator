@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { FakeBrowserAdapter } from "./browser.ts";
 import { isPmaiError } from "./errors.ts";
 import { HostBrowserAdapter } from "./host-browser.ts";
 import { getEngine } from "./host.ts";
@@ -209,10 +210,42 @@ export function usePmai() {
     decide: (id: string, d: "APPROVE" | "REJECT" | "CANCEL") => run(() => engine.decideApproval(id, d)),
     execute: (taskId: string) =>
       run(() => {
-        const dir = engine.snapshot().profile?.chromeDirectory;
+        const session = engine.sessionOwningTask(taskId);
+        const dir = session?.profile?.chromeDirectory || session?.profile?.id || engine.snapshot().profile?.chromeDirectory;
         const browser = hasElectronHost() ? new HostBrowserAdapter(dir) : undefined;
         return engine.executeTask(taskId, browser);
       }),
+    executeEnabled: () =>
+      run(() =>
+        engine.executeEnabledSessions((sessionId) => {
+          const s = engine.snapshot().sessions.find((x) => x.id === sessionId);
+          const dir = s?.profile.chromeDirectory || s?.profile.id;
+          if (hasElectronHost()) return new HostBrowserAdapter(dir);
+          const dest = s?.pages.find((p) => p.id === s.selectedPageId) ?? s?.pages[0];
+          return new FakeBrowserAdapter({
+            pageName: dest?.name,
+            pageUrl: dest?.url,
+          });
+        }),
+      ),
+    selectSession: (id: string) => run(() => engine.selectSession(id)),
+    toggleSession: (id: string, enabled: boolean) => run(() => engine.toggleSessionEnabled(id, enabled)),
+    launchSession: async (sessionId: string) => {
+      const s = engine.snapshot().sessions.find((x) => x.id === sessionId);
+      const dir = s?.profile.chromeDirectory || s?.profile.id;
+      if (!dir) {
+        setToast("Session chưa gắn hồ sơ Chrome.");
+        return;
+      }
+      await engine.selectSession(sessionId);
+      if (!hasElectronHost()) {
+        refresh();
+        return;
+      }
+      const launched = await hostInvoke("chrome.autoConnect", { directory: dir, profileId: dir, reuse: true });
+      if (!launched.ok) setToast(launched.error?.message ?? "Không mở được Chrome");
+      refresh();
+    },
     confirm: (taskId: string, found: boolean) => run(() => engine.confirmVerification(taskId, found)),
     clone: (id: string) => run(() => engine.cloneContent(id)),
     setLlm: (p: "openai" | "gemini" | "anthropic" | "xai" | "mock", model: string, key: string | null) =>

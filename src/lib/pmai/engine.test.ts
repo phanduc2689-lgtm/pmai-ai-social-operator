@@ -363,5 +363,71 @@ describe("destinations PROFILE / PAGE / GROUP", () => {
     assert.equal(done.status, "SUCCESS");
     const pub = browser.calls.find((c) => c.method === "publish");
     assert.equal((pub?.args[0] as { destinationType?: string })?.destinationType, "GROUP");
+    const lastGoto = [...browser.calls].reverse().find((c) => c.method === "goto");
+    assert.equal(lastGoto?.args[0], g.url);
+  });
+});
+
+describe("workspace sessions", () => {
+  it("adds a second session without wiping the first", async () => {
+    const e = primed();
+    await e.createProfile({ name: "Acc A", mode: "MANAGED_PROFILE" });
+    e.markLoggedIn("A", { seedDemo: false });
+    const p1 = e.addDestination({ type: "PAGE", name: "Page A", url: "https://www.facebook.com/pagea" });
+    e.selectPage(p1.id);
+    await e.createProfile({ name: "Acc B", mode: "MANAGED_PROFILE" });
+    e.markLoggedIn("B", { seedDemo: false });
+    const snap = e.snapshot();
+    assert.equal(snap.sessions.length, 2);
+    assert.equal(snap.sessions[0].profile.name, "Acc A");
+    assert.equal(snap.sessions[0].pages.length, 1);
+    assert.equal(snap.sessions[0].identity?.displayName, "A");
+    assert.equal(snap.profile?.name, "Acc B");
+    e.selectSession(snap.sessions[0].id);
+    assert.equal(e.snapshot().profile?.name, "Acc A");
+    assert.equal(e.snapshot().pages[0].name, "Page A");
+  });
+
+  it("runs queued tasks of two sessions in parallel and returns home", async () => {
+    const e = primed();
+    await e.createProfile({ name: "Acc A", mode: "MANAGED_PROFILE" });
+    e.markLoggedIn("A", { seedDemo: false });
+    const p1 = e.addDestination({ type: "PAGE", name: "Page A", url: "https://www.facebook.com/pagea" });
+    e.selectPage(p1.id);
+    const d1 = await e.createDraft("A");
+    const s1 = await e.submitForApproval(d1.id);
+    e.decideApproval(s1.approval.id, "APPROVE");
+
+    await e.createProfile({ name: "Acc B", mode: "MANAGED_PROFILE" });
+    e.markLoggedIn("B", { seedDemo: false });
+    const p2 = e.addDestination({ type: "PAGE", name: "Page B", url: "https://www.facebook.com/pageb" });
+    e.selectPage(p2.id);
+    const d2 = await e.createDraft("B");
+    const s2 = await e.submitForApproval(d2.id);
+    e.decideApproval(s2.approval.id, "APPROVE");
+
+    const idA = e.snapshot().sessions[0].id;
+    const b1 = new FakeBrowserAdapter({ pageName: "Page A", pageUrl: p1.url });
+    const b2 = new FakeBrowserAdapter({ pageName: "Page B", pageUrl: p2.url });
+    await e.executeEnabledSessions((id) => (id === idA ? b1 : b2));
+    assert.equal(e.snapshot().tasks.filter((t) => t.status === "SUCCESS").length, 2);
+    assert.ok(b1.calls.some((c) => c.method === "publish"));
+    assert.ok(b2.calls.some((c) => c.method === "publish"));
+    assert.equal([...b1.calls].reverse().find((c) => c.method === "goto")?.args[0], p1.url);
+    assert.equal([...b2.calls].reverse().find((c) => c.method === "goto")?.args[0], p2.url);
+  });
+
+  it("happy path still returns to destination home after SUCCESS", async () => {
+    const e = await readyEngine();
+    const page = e.snapshot().pages[0];
+    const draft = await e.createDraft("Tour Hà Giang");
+    const { task, approval } = await e.submitForApproval(draft.id);
+    e.decideApproval(approval.id, "APPROVE");
+    const browser = new FakeBrowserAdapter({ pageName: page.name, pageUrl: page.url });
+    const done = await e.executeTask(task.id, browser);
+    assert.equal(done.status, "SUCCESS");
+    const gotos = browser.calls.filter((c) => c.method === "goto");
+    assert.ok(gotos.length >= 2);
+    assert.equal(gotos.at(-1)?.args[0], page.url);
   });
 });

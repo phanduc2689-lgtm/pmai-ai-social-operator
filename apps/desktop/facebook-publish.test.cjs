@@ -8,7 +8,18 @@ const {
   isExactSaveName,
   normalizeLabel,
   pickFooterPublish,
+  actionPauseMs,
 } = require("./facebook-publish.cjs");
+
+describe("human pause", () => {
+  it("defaults to 10–15s and tests can force 0", () => {
+    assert.equal(actionPauseMs({ humanPauseMs: 0 }), 0);
+    for (let i = 0; i < 30; i++) {
+      const n = actionPauseMs({});
+      assert.ok(n >= 10000 && n <= 15000, String(n));
+    }
+  });
+});
 
 describe("exact CTA names", () => {
   it("accepts Đăng / Post and rejects Đăng ngay", () => {
@@ -144,7 +155,7 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
     });
   </script>
 </body></html>`);
-      const result = await publishFromComposer(page, { hasMedia: false });
+      const result = await publishFromComposer(page, { hasMedia: false, humanPauseMs: 0 });
       assert.equal(result.ok, true);
       assert.equal(await page.evaluate(() => window.__cta), "publish");
     });
@@ -174,7 +185,7 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
     });
   </script>
 </body></html>`);
-      const result = await publishFromComposer(page, { hasMedia: false });
+      const result = await publishFromComposer(page, { hasMedia: false, humanPauseMs: 0 });
       assert.equal(result.ok, true);
       assert.equal(await page.evaluate(() => window.__cta), "publish");
     });
@@ -202,7 +213,7 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
     });
   </script>
 </body></html>`);
-      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PROFILE" });
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PROFILE", humanPauseMs: 0 });
       assert.equal(result.ok, true);
       assert.equal(await page.evaluate(() => window.__cta), "publish");
     });
@@ -339,7 +350,7 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
     });
   </script>
 </body></html>`);
-      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE" });
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE", humanPauseMs: 0 });
       assert.equal(result.ok, true);
       const steps = await page.evaluate(() => window.__steps);
       assert.equal(steps.includes("later"), true);
@@ -382,7 +393,7 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
     });
   </script>
 </body></html>`);
-      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE" });
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE", humanPauseMs: 0 });
       assert.equal(result.ok, true);
       assert.equal(await page.evaluate(() => window.__cta), "publish");
     });

@@ -1,5 +1,5 @@
 import { PmaiError } from "./errors.ts";
-import type { DestinationType, PageTarget } from "./types.ts";
+import type { DestinationType, PageTarget, WorkspaceState } from "./types.ts";
 
 export const DEST_TYPES = ["PROFILE", "PAGE", "GROUP"] as const;
 
@@ -56,4 +56,9 @@ export function assertDestinationUrl(type: DestinationType, url: string): string
 
 export function destinationsOf(pages: PageTarget[], type: DestinationType): PageTarget[] {
   return pages.filter((p) => destType(p) === type);
+}
+
+export function allPagesOf(snap: Pick<WorkspaceState, "pages" | "sessions">): PageTarget[] {
+  if (snap.sessions?.length) return snap.sessions.flatMap((s) => s.pages);
+  return snap.pages ?? [];
 }

@@ -37,7 +37,13 @@ function ChromeLiveBar() {
     if (!hasElectronHost()) return;
     let stop = false;
     async function tick() {
-      const st = await hostInvoke<{ cdpAvailable: boolean; live: boolean; liveMode: string | null; locked: boolean }>("chrome.status");
+      const st = await hostInvoke<{
+        cdpAvailable: boolean;
+        live: boolean;
+        liveMode: string | null;
+        liveCount?: number;
+        locked: boolean;
+      }>("chrome.status");
       let extra = "";
       if (st.ok && st.data?.live) {
         const ob = await hostInvoke<{ url: string; pageState: string; pageName: string | null }>("chrome.observe");
@@ -52,7 +58,7 @@ function ChromeLiveBar() {
         const connected = Boolean(d?.live || d?.cdpAvailable);
         setOk(connected);
         setLine(
-          `Chrome ${d?.live ? "đã gắn" : "chưa gắn"} · CDP ${d?.cdpAvailable ? "9222 mở" : "tắt"}${d?.liveMode ? ` · ${d.liveMode}` : ""}${d?.locked ? " · đang khóa hồ sơ" : ""}${extra}`,
+          `Chrome ${d?.live ? "đã gắn" : "chưa gắn"} · ${d?.liveCount ?? (d?.live ? 1 : 0)} cửa sổ${d?.liveMode ? ` · ${d.liveMode}` : ""}${d?.locked ? " · đang khóa hồ sơ" : ""}${extra}`,
         );
       }
       if (!stop) setTimeout(tick, 4000);
@@ -156,7 +162,9 @@ function PmaiShell() {
             );
           })}
         </nav>
-        <p style={{ padding: "12px 16px", fontSize: 11, color: "var(--color-subtle)" }}>v1.0 · một operator · local</p>
+        <p style={{ padding: "12px 16px", fontSize: 11, color: "var(--color-subtle)" }}>
+          v1.3 · {snap.sessions.length || 1} session · local
+        </p>
       </aside>
 
       <div className="pmai-col">

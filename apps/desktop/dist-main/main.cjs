@@ -16,7 +16,7 @@ app.commandLine.appendSwitch("disable-direct-composition");
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion,HardwareMediaKeyHandling");
 app.commandLine.appendSwitch("use-angle", "swiftshader");
 app.commandLine.appendSwitch("use-gl", "angle");
-console.log("PMAI v1.0.0 boot gpu-swiftshader");
+console.log("PMAI v1.3.0 boot gpu-swiftshader");
 
 const chromeScan = require("./chrome-profiles.cjs");
 let playwrightAdapter = null;
@@ -392,9 +392,9 @@ function registerIpc() {
       }),
     ),
   );
-  handleOnce("chrome.observe", wrap(async () => adapter().observe()));
-  handleOnce("chrome.goto", wrap(async (payload) => adapter().goto(payload.url)));
-  handleOnce("chrome.type", wrap(async (payload) => adapter().typeText(payload.name, payload.text)));
+  handleOnce("chrome.observe", wrap(async (payload) => adapter().observe(pickDirectory(payload))));
+  handleOnce("chrome.goto", wrap(async (payload) => adapter().goto(payload.url, pickDirectory(payload))));
+  handleOnce("chrome.type", wrap(async (payload) => adapter().typeText(payload.name, payload.text, pickDirectory(payload))));
   handleOnce(
     "chrome.upload",
     wrap(async (payload) => {
@@ -407,19 +407,21 @@ function registerIpc() {
           throw e;
         }
       }
-      return adapter().uploadFiles(files);
+      return adapter().uploadFiles(files, pickDirectory(payload));
     }),
   );
-  handleOnce("chrome.click", wrap(async (payload) => adapter().clickNamed(payload.name)));
+  handleOnce("chrome.click", wrap(async (payload) => adapter().clickNamed(payload.name, pickDirectory(payload))));
   handleOnce(
     "chrome.publish",
     wrap(async (payload) => {
-      if (typeof adapter().publishPost === "function") return adapter().publishPost(payload || {});
-      return adapter().clickNamed("Đăng");
+      const body = payload || {};
+      body.profileId = pickDirectory(body);
+      if (typeof adapter().publishPost === "function") return adapter().publishPost(body);
+      return adapter().clickNamed("Đăng", body.profileId);
     }),
   );
-  handleOnce("chrome.screenshot", wrap(async () => adapter().screenshotPng()));
-  handleOnce("chrome.close", wrap(async () => adapter().closeBrowser()));
+  handleOnce("chrome.screenshot", wrap(async (payload) => adapter().screenshotPng(pickDirectory(payload))));
+  handleOnce("chrome.close", wrap(async (payload) => adapter().closeBrowser(pickDirectory(payload))));
   for (const ch of ALLOWLIST) {
     handleOnce(ch, async () => ({
       ok: false,

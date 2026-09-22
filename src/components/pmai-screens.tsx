@@ -3,7 +3,7 @@ import { ImagePlus, Link2, Trash2 } from "lucide-react";
 import { hasElectronHost } from "@/lib/pmai/ipc.ts";
 import { attachedMedia, formatBytes } from "@/lib/pmai/media.ts";
 import { previewOf } from "@/lib/pmai/media-preview.ts";
-import { destGlyph, destKindLabel, destType, destinationsOf } from "@/lib/pmai/dest.ts";
+import { destGlyph, destKindLabel, destType, destinationsOf, allPagesOf } from "@/lib/pmai/dest.ts";
 import type { DestinationType, MediaAsset } from "@/lib/pmai/types.ts";
 import type { usePmai } from "@/lib/pmai/use-pmai.ts";
 
@@ -29,8 +29,31 @@ export function Dashboard({
         >
           Tạo bài đăng
         </button>
+        {snap.sessions.some((s) => s.enabled) && snap.tasks.some((t) => t.status === "QUEUED") ? (
+          <button
+            type="button"
+            onClick={() => api.executeEnabled()}
+            className="h-12 rounded-md border border-accent px-5 font-sans text-sm font-medium text-accent"
+          >
+            Chạy {snap.sessions.filter((s) => s.enabled).length} session đã chọn
+          </button>
+        ) : null}
         {!gate.ok ? <p className="self-center font-sans text-sm text-muted">{gate.reason}</p> : null}
       </div>
+      {snap.sessions.length > 1 ? (
+        <ul className="mt-6 grid gap-2 sm:grid-cols-2">
+          {snap.sessions.map((s) => (
+            <li key={s.id} className="rounded-xl border border-border bg-surface px-4 py-3 text-sm">
+              <p className="font-medium">
+                {s.enabled ? "●" : "○"} {s.profile.name}
+              </p>
+              <p className="text-xs text-muted">
+                {s.identity?.displayName ?? "Chưa login"} · {s.pages.length} đích · {s.enabled ? "sẽ chạy" : "bỏ qua"}
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <div className="mt-8 grid gap-4 sm:grid-cols-3">
         {[
           ["Chờ duyệt", pendingApprovals.length],
@@ -371,7 +394,7 @@ export function Approve({ api }: { api: ReturnType<typeof usePmai> }) {
         {items.map((a) => {
           const c = snap.contents.find((x) => x.id === a.contentId);
           const t = snap.tasks.find((x) => x.id === a.taskId);
-          const dest = snap.pages.find((p) => p.id === a.pageTargetId);
+          const dest = allPagesOf(snap).find((p) => p.id === a.pageTargetId);
           const kind = destType(dest);
           const shots = c?.media.filter((m) => m.attach !== false) ?? [];
           return (

@@ -12,6 +12,11 @@ export class HostBrowserAdapter implements BrowserAdapter {
     return { canAttach: true, canPersistent: true, canUpload: true, canScreenshot: true };
   }
 
+  private payload(extra?: Record<string, unknown>) {
+    const profileId = this.directory || undefined;
+    return { ...extra, profileId, directory: profileId };
+  }
+
   private async call<T>(channel: string, payload?: unknown): Promise<T> {
     const r = await hostInvoke<T>(channel, payload);
     if (!r.ok) {
@@ -26,19 +31,19 @@ export class HostBrowserAdapter implements BrowserAdapter {
 
   async launchProfile(id: string) {
     this.calls.push({ method: "launchProfile", args: [id] });
-    await this.call("chrome.launch", { directory: this.directory || id, reuse: true });
+    await this.call("chrome.launch", this.payload({ reuse: true, directory: this.directory || id }));
   }
   async observe() {
     this.calls.push({ method: "observe", args: [] });
-    return this.call<Observation>("chrome.observe");
+    return this.call<Observation>("chrome.observe", this.payload());
   }
   async goto(url: string) {
     this.calls.push({ method: "goto", args: [url] });
-    await this.call("chrome.goto", { url });
+    await this.call("chrome.goto", this.payload({ url }));
   }
   async type(target: SemanticTarget, text: string) {
     this.calls.push({ method: "type", args: [target, text] });
-    await this.call("chrome.type", { name: target.name, text });
+    await this.call("chrome.type", this.payload({ name: target.name, text }));
   }
   async upload(files: string[]) {
     this.calls.push({ method: "upload", args: [files] });
@@ -46,22 +51,22 @@ export class HostBrowserAdapter implements BrowserAdapter {
     if (bad) {
       throw new PmaiError("NOT_READY", `Không upload id nội bộ ${bad}. Chọn lại ảnh từ máy.`);
     }
-    await this.call("chrome.upload", { files });
+    await this.call("chrome.upload", this.payload({ files }));
   }
   async click(target: SemanticTarget) {
     this.calls.push({ method: "click", args: [target] });
-    await this.call("chrome.click", { name: target.name });
+    await this.call("chrome.click", this.payload({ name: target.name }));
   }
   async publish(opts?: { destinationType?: import("./types.ts").DestinationType; hasMedia?: boolean; hasVideo?: boolean }) {
     this.calls.push({ method: "publish", args: [opts ?? {}] });
-    return this.call<PublishResult>("chrome.publish", opts ?? {});
+    return this.call<PublishResult>("chrome.publish", this.payload({ ...(opts ?? {}) }));
   }
   async screenshot() {
     this.calls.push({ method: "screenshot", args: [] });
-    return this.call<string>("chrome.screenshot");
+    return this.call<string>("chrome.screenshot", this.payload());
   }
   async close() {
     this.calls.push({ method: "close", args: [] });
-    await this.call("chrome.close");
+    await this.call("chrome.close", this.payload());
   }
 }

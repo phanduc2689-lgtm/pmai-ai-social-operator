@@ -10,14 +10,47 @@ const media = require("./media-upload.cjs");
 
 const DEFAULT_CDP_PORT = 9222;
 
-let live = {
-  browser: null,
-  context: null,
-  page: null,
-  mode: null,
-  profileId: null,
-  cdpPort: DEFAULT_CDP_PORT,
-};
+/** One live CDP connection per PMAI Chrome profile. Concurrent sessions are the product. */
+const pool = new Map();
+let lastId = null;
+
+function emptyLive(port = DEFAULT_CDP_PORT) {
+  return { browser: null, context: null, page: null, mode: null, profileId: null, cdpPort: port };
+}
+
+function resolveProfileId(arg) {
+  if (arg == null || arg === "") return lastId;
+  if (typeof arg === "string") return arg;
+  return arg.profileId || arg.directory || lastId;
+}
+
+function getLive(profileId) {
+  const id = resolveProfileId(profileId);
+  if (id && pool.has(id)) {
+    lastId = id;
+    return pool.get(id);
+  }
+  if (lastId && pool.has(lastId)) return pool.get(lastId);
+  if (pool.size === 1) return [...pool.values()][0];
+  return emptyLive();
+}
+
+function putLive(profileId, live) {
+  if (!profileId) return live;
+  pool.set(profileId, live);
+  lastId = profileId;
+  return live;
+}
+
+function requireLive(profileId) {
+  const live = getLive(profileId);
+  if (!live || !live.page) throw err("NOT_READY", "Browser chưa launch");
+  return live;
+}
+
+function sessionCount() {
+  return pool.size;
+}
 
 function err(code, message) {
   const e = new Error(message);
@@ -133,7 +166,7 @@ function cdpUrl(port) {
   return `http://127.0.0.1:${port}`;
 }
 
-function isCdpUp(port = live.cdpPort || DEFAULT_CDP_PORT) {
+function isCdpUp(port = DEFAULT_CDP_PORT) {
   return new Promise((resolve) => {
     const req = http.get(`${cdpUrl(port)}/json/version`, { timeout: 800 }, (res) => {
       res.resume();
@@ -156,20 +189,26 @@ async function waitCdp(port, ms = 25000) {
   return false;
 }
 
+function usedCdpPorts() {
+  return new Set([...pool.values()].map((s) => s.cdpPort).filter(Boolean));
+}
+
 async function findFreePort(start = DEFAULT_CDP_PORT) {
-  for (let p = start; p < start + 20; p++) {
+  const used = usedCdpPorts();
+  for (let p = start; p < start + 80; p++) {
+    if (used.has(p)) continue;
     if (!(await isCdpUp(p))) return p;
   }
   return start;
 }
 
-async function pageAlive() {
-  if (!live.page) return false;
+async function pageAlive(live) {
+  if (!live || !live.page) return false;
   try {
     await live.page.evaluate(() => document.readyState);
     return true;
   } catch {
-    live = { browser: null, context: null, page: null, mode: null, profileId: null, cdpPort: DEFAULT_CDP_PORT };
+    if (live.profileId) pool.delete(live.profileId);
     return false;
   }
 }
@@ -181,7 +220,8 @@ async function connectCdp(port, profileId) {
   if (!context) throw err("NOT_READY", "Chrome CDP không có context.");
   const pages = context.pages();
   const page = pages.find((p) => /facebook\.com/i.test(p.url())) || pages[0] || (await context.newPage());
-  live = { browser, context, page, mode: "cdp", profileId, cdpPort: port };
+  const live = { browser, context, page, mode: "cdp", profileId, cdpPort: port };
+  putLive(profileId, live);
   return { mode: "cdp", profileId, cdpPort: port };
 }
 
@@ -213,14 +253,23 @@ function spawnChromeForProfile(profile, port) {
   child.unref();
 }
 
+function portOwnedByOther(port, profileId) {
+  for (const [id, s] of pool) {
+    if (id !== profileId && s.cdpPort === port && s.page) return true;
+  }
+  return false;
+}
+
 async function ensureBrowser(profileId) {
   let profile = profileId ? store.getProfile(profileId) : store.pickLoggedInChromeProfile();
   if (!profile) profile = store.createPmaiProfile("Hồ sơ 1");
-  if (await pageAlive()) {
-    if (!live.profileId || live.profileId === profile.id) return { mode: live.mode, reused: true, profileId: profile.id };
+  const existing = pool.get(profile.id);
+  if (existing && (await pageAlive(existing))) {
+    lastId = profile.id;
+    return { mode: existing.mode, reused: true, profileId: profile.id, cdpPort: existing.cdpPort };
   }
   const port = profile.cdpPort || DEFAULT_CDP_PORT;
-  if (await isCdpUp(port) && !profile.locked) {
+  if ((await isCdpUp(port)) && !profile.locked && !portOwnedByOther(port, profile.id)) {
     try {
       return await connectCdp(port, profile.id);
     } catch {
@@ -230,7 +279,8 @@ async function ensureBrowser(profileId) {
   if (profile.locked && !(await isCdpUp(port))) {
     throw err("IDLE_BLOCKED", `Đang mở Chrome hồ sơ «${profile.displayName}» nhưng không có CDP.`);
   }
-  const usePort = (await isCdpUp(port)) ? await findFreePort(port + 1) : port;
+  const conflict = portOwnedByOther(port, profile.id) || (await isCdpUp(port));
+  const usePort = conflict ? await findFreePort(port + 1) : port;
   spawnChromeForProfile(profile, usePort);
   store.touchProfile(profile.id, { cdpPort: usePort });
   if (!(await waitCdp(usePort, 25000))) throw err("NOT_READY", "Cổng CDP chưa sẵn sàng.");
@@ -243,10 +293,24 @@ async function listProfiles() {
 
 async function status() {
   const profiles = store.listPmaiProfiles();
+  const sessions = [];
+  for (const [id, s] of pool) {
+    const alive = await pageAlive(s);
+    sessions.push({
+      profileId: id,
+      cdpPort: s.cdpPort,
+      live: alive,
+      liveMode: s.mode,
+    });
+  }
+  const anyLive = sessions.some((s) => s.live);
+  const current = getLive();
   return {
-    cdpAvailable: await isCdpUp(live.cdpPort || DEFAULT_CDP_PORT),
-    live: Boolean(live.page),
-    liveMode: live.mode,
+    cdpAvailable: anyLive || (await isCdpUp(current.cdpPort || DEFAULT_CDP_PORT)),
+    live: anyLive,
+    liveMode: current.mode,
+    liveCount: sessions.filter((s) => s.live).length,
+    sessions,
     executable: store.defaultChromeExecutable(),
     userDataDir: store.profilesRoot(),
     picked: store.pickLoggedInChromeProfile(profiles),
@@ -264,8 +328,8 @@ async function cloneProfile(payload = {}) {
   return store.clonePmaiProfile(payload.sourceId || payload.directory, payload.displayName || payload.name);
 }
 
-async function observe() {
-  if (!live.page) throw err("NOT_READY", "Browser chưa launch");
+async function observe(profileId) {
+  const live = requireLive(profileId);
   const url = live.page.url();
   const title = await live.page.title();
   let pageState = "unknown";
@@ -278,28 +342,33 @@ async function observe() {
   let pageName = title ? title.replace(/\s*\|\s*Facebook\s*$/i, "").trim() : null;
   if (pageName && /^facebook$/i.test(pageName)) pageName = null;
   if (live.profileId) store.touchProfile(live.profileId, {});
-  return { url, title, pageState, pageName, profileId: live.profileId };
+  return { url, title, pageState, pageName, profileId: live.profileId, cdpPort: live.cdpPort };
 }
 
 async function launchSelected(directory, opts = {}) {
-  const launched = await ensureBrowser(directory);
+  const launched = await ensureBrowser(directory || opts.profileId);
+  const live = requireLive(launched.profileId);
   if (!opts.reuse || !launched.reused) {
     await live.page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 45000 });
   }
-  return observe();
+  return observe(launched.profileId);
 }
 
 async function autoConnect(opts = {}) {
   const observation = await launchSelected(opts.directory || opts.profileId, { reuse: Boolean(opts.reuse) });
+  const live = getLive(opts.profileId || opts.directory);
   return {
     profile: store.getProfile(live.profileId) || store.pickLoggedInChromeProfile(),
     observation,
     cdpAvailable: await isCdpUp(live.cdpPort),
     liveMode: live.mode,
+    profileId: live.profileId,
+    cdpPort: live.cdpPort,
   };
 }
 
-async function goto(url) {
+async function goto(url, profileId) {
+  const live = requireLive(profileId);
   await live.page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
   await sleep(1000);
   try {
@@ -308,7 +377,7 @@ async function goto(url) {
     /* group/page chrome still hydrating */
   }
   await sleep(700);
-  return observe();
+  return observe(live.profileId);
 }
 
 async function composerReady(page) {
@@ -364,19 +433,20 @@ async function clickComposerInPage(page) {
   return false;
 }
 
-async function ensureComposerOpen() {
-  if (await composerReady(live.page)) return;
+async function ensureComposerOpen(page) {
+  if (!page) throw err("NOT_READY", "Browser chưa launch");
+  if (await composerReady(page)) return;
 
-  const join = live.page.getByRole("button", { name: /tham gia nhóm|join group|join this group/i }).first();
+  const join = page.getByRole("button", { name: /tham gia nhóm|join group|join this group/i }).first();
   if (await join.isVisible().catch(() => false)) {
     throw err("NOT_READY", "Group chưa tham gia / không có quyền đăng. Mở group trên Chrome, tham gia, rồi duyệt lại.");
   }
 
-  const opener = await firstVisible(composerOpeners(live.page), 14000);
+  const opener = await firstVisible(composerOpeners(page), 14000);
   if (opener) {
     await safeClick(opener);
   } else {
-    const clicked = await clickComposerInPage(live.page);
+    const clicked = await clickComposerInPage(page);
     if (!clicked) {
       throw err(
         "UI_CHANGED",
@@ -387,33 +457,36 @@ async function ensureComposerOpen() {
 
   const start = Date.now();
   while (Date.now() - start < 12000) {
-    if (await composerReady(live.page)) return;
+    if (await composerReady(page)) return;
     await sleep(300);
   }
 }
 
-async function typeText(_name, text) {
-  await ensureComposerOpen();
+async function typeText(_name, text, profileId) {
+  const live = requireLive(profileId);
+  await ensureComposerOpen(live.page);
   const target = await firstVisible(composerTargets(live.page), 8000);
   if (target) await safeClick(target);
   await new Promise((r) => setTimeout(r, 250));
   await live.page.keyboard.insertText(String(text || ""));
 }
 
-async function uploadFiles(files) {
-  await ensureComposerOpen();
+async function uploadFiles(files, profileId) {
+  const live = requireLive(profileId);
+  await ensureComposerOpen(live.page);
   const list = Array.isArray(files) ? files : [files];
   await media.uploadToFacebook(live.page, list.filter(Boolean));
 }
 
-async function clickNamed(name) {
+async function clickNamed(name, profileId) {
+  const live = requireLive(profileId);
   const n = String(name || "");
   if (/composer|bài viết|create a post/i.test(n)) {
-    await ensureComposerOpen();
+    await ensureComposerOpen(live.page);
     return;
   }
   if (n === "Đăng" || n === "đăng" || /^(post|publish)$/i.test(n) || /publish/i.test(n)) {
-    return publishPost();
+    return publishPost({ profileId: live.profileId });
   }
   const btn = await firstVisible(genericLocators(live.page, n), 2000);
   if (!btn) throw err("UI_CHANGED", `Không thấy nút «${name}».`);
@@ -421,17 +494,19 @@ async function clickNamed(name) {
 }
 
 async function publishPost(opts = {}) {
-  if (!live.page) throw err("NOT_READY", "Browser chưa launch");
-  await ensureComposerOpen();
+  const live = requireLive(opts.profileId);
+  await ensureComposerOpen(live.page);
   const fbPublish = require("./facebook-publish.cjs");
   return fbPublish.publishFromComposer(live.page, {
     hasMedia: opts.hasMedia !== false,
     hasVideo: Boolean(opts.hasVideo),
     destinationType: opts.destinationType || "PAGE",
+    humanPauseMs: typeof opts.humanPauseMs === "number" ? opts.humanPauseMs : undefined,
   });
 }
 
-async function screenshotPng() {
+async function screenshotPng(profileId) {
+  const live = requireLive(profileId);
   let dir;
   try {
     dir = path.join(require("electron").app.getPath("userData"), "evidence");
@@ -444,12 +519,25 @@ async function screenshotPng() {
   return file;
 }
 
-async function closeBrowser() {
-  try {
-    if (live.mode !== "cdp") await live.context?.close();
-  } finally {
-    live = { browser: null, context: null, page: null, mode: null, profileId: null, cdpPort: DEFAULT_CDP_PORT };
+async function closeBrowser(profileId) {
+  const id = resolveProfileId(profileId);
+  const closeOne = async (key, live) => {
+    try {
+      if (live && live.mode !== "cdp") await live.context?.close();
+    } catch {
+      /* ignore */
+    }
+    pool.delete(key);
+  };
+  if (id && pool.has(id)) {
+    await closeOne(id, pool.get(id));
+    if (lastId === id) lastId = pool.size ? [...pool.keys()][0] : null;
+    return;
   }
+  for (const [key, live] of [...pool.entries()]) {
+    await closeOne(key, live);
+  }
+  lastId = null;
 }
 
 module.exports = {
@@ -469,4 +557,5 @@ module.exports = {
   closeBrowser,
   isCdpUp,
   isComposerCue,
+  sessionCount,
 };

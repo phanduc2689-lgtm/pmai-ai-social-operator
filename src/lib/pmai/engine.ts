@@ -14,11 +14,13 @@ import type {
   BrowserProfile,
   ContactTemplate,
   ContentItem,
+  FacebookIdentity,
   MediaAsset,
   PageTarget,
   DestinationType,
   Task,
   VoiceProfile,
+  WorkspaceSession,
   WorkspaceState,
 } from "./types.ts";
 
@@ -33,10 +35,15 @@ export function sanitizeComposerBody(body: string): string {
 
 const STORAGE_KEY = "pmai.store.v2";
 
+export const HUMAN_PAUSE_MIN_MS = 10_000;
+export const HUMAN_PAUSE_MAX_MS = 15_000;
+
 export interface EngineDeps {
   llm?: LlmClient;
   browser?: BrowserAdapter;
   persist?: boolean;
+  /** Tests pass 0. Live Chrome uses 10–15s unless set. */
+  humanPauseMs?: number;
 }
 
 export class PmaiEngine {
@@ -45,10 +52,13 @@ export class PmaiEngine {
   private llm: LlmClient;
   private browserFactory: () => BrowserAdapter;
   lastBrowser: BrowserAdapter | null = null;
+  private forcedHumanPauseMs: number | null;
+  private runningSessionIds = new Set<string>();
 
   constructor(deps: EngineDeps = {}) {
     this.state = emptyWorkspace();
     this.llm = deps.llm ?? createLlmClient("mock", null, "mock-local");
+    this.forcedHumanPauseMs = typeof deps.humanPauseMs === "number" ? deps.humanPauseMs : null;
     this.browserFactory =
       deps.browser != null
         ? () => deps.browser as BrowserAdapter
@@ -66,6 +76,7 @@ export class PmaiEngine {
   }
 
   private persist() {
+    this.commitActiveToSession();
     if (typeof localStorage === "undefined") return;
     const copy = this.snapshot();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(copy));
@@ -77,6 +88,7 @@ export class PmaiEngine {
     if (!raw) return;
     try {
       const parsed = JSON.parse(raw) as Partial<WorkspaceState>;
+      const sessions = migrateSessions(parsed);
       this.state = {
         ...emptyWorkspace(),
         ...parsed,
@@ -91,11 +103,14 @@ export class PmaiEngine {
             attach: m.attach !== false,
           })),
         })),
+        sessions,
+        activeSessionId: parsed.activeSessionId ?? sessions[0]?.id ?? null,
         pages: (parsed.pages ?? []).map((p) => ({
           ...p,
           type: destType(p),
         })),
       };
+      if (sessions.length) this.syncActiveFromSession();
     } catch {
       /* ignore */
     }
@@ -121,7 +136,97 @@ export class PmaiEngine {
   }
 
   private selectedPage(): PageTarget | null {
-    return this.state.pages.find((p) => p.id === this.state.selectedPageId) ?? null;
+    return this.findPage(this.state.selectedPageId ?? "") ?? this.state.pages.find((p) => p.id === this.state.selectedPageId) ?? null;
+  }
+
+  private allPages(): PageTarget[] {
+    if (this.state.sessions.length) return this.state.sessions.flatMap((s) => s.pages);
+    return this.state.pages;
+  }
+
+  private findPage(id: string): PageTarget | undefined {
+    if (!id) return undefined;
+    return this.allPages().find((p) => p.id === id);
+  }
+
+  activeSession(): WorkspaceSession | null {
+    return this.state.sessions.find((s) => s.id === this.state.activeSessionId) ?? this.state.sessions[0] ?? null;
+  }
+
+  sessionOwningPage(pageId: string | null | undefined): WorkspaceSession | null {
+    if (!pageId) return this.activeSession();
+    return this.state.sessions.find((s) => s.pages.some((p) => p.id === pageId)) ?? this.activeSession();
+  }
+
+  sessionOwningTask(taskId: string): WorkspaceSession | null {
+    const t = this.state.tasks.find((x) => x.id === taskId);
+    return this.sessionOwningPage(t?.pageTargetId);
+  }
+
+  private commitActiveToSession() {
+    const s = this.activeSession();
+    if (!s) return;
+    s.profile = this.state.profile ?? s.profile;
+    s.identity = this.state.identity;
+    s.pages = this.state.pages;
+    s.selectedPageId = this.state.selectedPageId;
+  }
+
+  private syncActiveFromSession() {
+    const s = this.activeSession();
+    if (!s) {
+      this.state.profile = null;
+      this.state.identity = null;
+      this.state.pages = [];
+      this.state.selectedPageId = null;
+      return;
+    }
+    this.state.profile = s.profile;
+    this.state.identity = s.identity;
+    this.state.pages = s.pages;
+    this.state.selectedPageId = s.selectedPageId;
+  }
+
+  selectSession(sessionId: string) {
+    const s = this.state.sessions.find((x) => x.id === sessionId);
+    if (!s) throw new PmaiError("NOT_READY", "Không thấy session.");
+    this.commitActiveToSession();
+    this.state.activeSessionId = s.id;
+    this.syncActiveFromSession();
+    this.log("session.select", "OK", s.profile.name);
+    this.persist();
+    return s;
+  }
+
+  toggleSessionEnabled(sessionId: string, enabled: boolean) {
+    const s = this.state.sessions.find((x) => x.id === sessionId);
+    if (!s) throw new PmaiError("NOT_READY", "Không thấy session.");
+    s.enabled = enabled;
+    this.log("session.toggle", enabled ? "ON" : "OFF", s.profile.name);
+    this.persist();
+    return s;
+  }
+
+  private humanDelayMs(): number {
+    if (this.forcedHumanPauseMs != null) return Math.max(0, this.forcedHumanPauseMs);
+    return HUMAN_PAUSE_MIN_MS + Math.floor(Math.random() * (HUMAN_PAUSE_MAX_MS - HUMAN_PAUSE_MIN_MS + 1));
+  }
+
+  private async pauseLikeHuman(adapter: BrowserAdapter, reason: string, taskId: string) {
+    if (adapter.kind === "fake" || adapter instanceof FakeBrowserAdapter) return;
+    const ms = this.humanDelayMs();
+    if (!ms) return;
+    this.log("publish.stage", "OK", `HUMAN_PAUSE ${Math.round(ms / 1000)}s · ${reason}`, taskId);
+    await new Promise((r) => setTimeout(r, ms));
+  }
+
+  private async returnHome(adapter: BrowserAdapter, url: string, taskId: string) {
+    this.log("publish.stage", "OK", "RETURN_HOME", taskId);
+    try {
+      await adapter.goto(url);
+    } catch {
+      this.log("publish.stage", "FAIL", "RETURN_HOME", taskId);
+    }
   }
 
   lights() {
@@ -160,13 +265,24 @@ export class PmaiEngine {
       userDataDir: input.userDataDir,
       facebookLikely: input.facebookLikely,
     };
-    this.state.profile = profile;
-    this.state.identity = {
+    const identity: FacebookIdentity = {
       id: newId("idn"),
       profileId: profile.id,
       displayName: "Chưa đăng nhập",
       sessionStatus: "AUTH_REQUIRED",
     };
+    this.commitActiveToSession();
+    const session: WorkspaceSession = {
+      id: profile.id,
+      enabled: true,
+      profile,
+      identity,
+      pages: [],
+      selectedPageId: null,
+    };
+    this.state.sessions.push(session);
+    this.state.activeSessionId = session.id;
+    this.syncActiveFromSession();
     this.state.firstRunStep = 2;
     this.log("profile.create", "OK", `${profile.mode} ${profile.name} ${profile.chromeDirectory ?? ""}`);
     this.persist();
@@ -441,7 +557,7 @@ export class PmaiEngine {
 
   async submitForApproval(contentId: string) {
     const c = this.requireContent(contentId);
-    const page = this.state.pages.find((p) => p.id === c.pageTargetId);
+    const page = this.findPage(c.pageTargetId);
     if (!page || page.status !== "VERIFIED") {
       throw new PmaiError("NOT_READY", "Trang đích chưa xác minh.");
     }
@@ -537,7 +653,8 @@ export class PmaiEngine {
     if (!t) throw new PmaiError("NOT_READY", "Không có task.");
     const a = this.state.approvals.find((x) => x.taskId === taskId);
     const c = this.requireContent(t.contentId);
-    const page = this.state.pages.find((p) => p.id === t.pageTargetId);
+    const owner = this.sessionOwningPage(t.pageTargetId);
+    const page = this.findPage(t.pageTargetId) ?? owner?.pages.find((p) => p.id === t.pageTargetId);
     if (!a || !page) throw new PmaiError("NOT_READY", "Thiếu approval hoặc đích đăng.");
 
     assertPublishAllowed({
@@ -548,8 +665,12 @@ export class PmaiEngine {
       approvalRevisionHash: a.contentRevisionHash,
     });
 
-    const running = this.state.tasks.filter((x) => x.status === "RUNNING" && x.pageTargetId === t.pageTargetId);
-    if (running.length) throw new PmaiError("IDLE_BLOCKED", "Account đang chạy một task.");
+    const sessionKey = owner?.id ?? t.pageTargetId;
+    const sessionPageIds = new Set((owner?.pages ?? [page]).map((p) => p.id));
+    const running = this.state.tasks.filter((x) => x.status === "RUNNING" && sessionPageIds.has(x.pageTargetId));
+    if (running.length || this.runningSessionIds.has(sessionKey)) {
+      throw new PmaiError("IDLE_BLOCKED", "Account đang chạy một task.");
+    }
 
     const dup = this.state.tasks.find(
       (x) =>
@@ -560,19 +681,30 @@ export class PmaiEngine {
     );
     if (dup) throw new PmaiError("IDEMPOTENT_REJECT", "Không retry khi đang chạy hoặc cần kiểm tra kết quả.");
 
+    const selectedUrl = owner
+      ? owner.pages.find((p) => p.id === owner.selectedPageId)?.url
+      : this.selectedPage()?.url;
+    if (selectedUrl && selectedUrl !== page.url) {
+      throw new PmaiError("ACCOUNT_MISMATCH", "Sai URL đích đã chọn.");
+    }
+
     t.status = "RUNNING";
-    this.log("task.start", "RUNNING", t.id, t.id);
+    this.runningSessionIds.add(sessionKey);
+    this.log("task.start", "RUNNING", `${t.id} · ${owner?.profile.name ?? "session"}`, t.id);
     this.persist();
 
     const adapter = browser ?? this.browserFactory();
     this.lastBrowser = adapter;
     const requirePath = adapter.kind !== "fake";
+    let openedDest = false;
 
     try {
-      if (this.state.identity?.sessionStatus !== "CONNECTED") {
+      const identity = owner?.identity ?? this.state.identity;
+      const profile = owner?.profile ?? this.state.profile;
+      if (identity?.sessionStatus !== "CONNECTED") {
         throw new PmaiError("AUTH_LOGOUT", "Phiên Facebook không CONNECTED.");
       }
-      await adapter.launchProfile(this.state.profile?.id ?? "none");
+      await adapter.launchProfile(profile?.chromeDirectory || profile?.id || "none");
       const obs0 = await adapter.observe();
       if (obs0.pageState === "captcha") throw new PmaiError("CAPTCHA_REQUIRED", "CAPTCHA — mở đúng hồ sơ.");
       if (obs0.pageState === "checkpoint") throw new PmaiError("CHECKPOINT", "Checkpoint — xử lý tay.");
@@ -580,7 +712,10 @@ export class PmaiEngine {
 
       this.log("publish.stage", "OK", "FACEBOOK_SESSION_VERIFIED", t.id);
       this.log("publish.stage", "RUNNING", `DESTINATION_OPEN ${destType(page)}`, t.id);
+      await this.pauseLikeHuman(adapter, "trước khi mở đích", t.id);
       await adapter.goto(page.url);
+      openedDest = true;
+      await this.pauseLikeHuman(adapter, "sau khi mở đích", t.id);
       const obs1 = await adapter.observe();
       if (obs1.pageState === "login") throw new PmaiError("AUTH_LOGOUT", "Đã đăng xuất.");
       if (obs1.pageState === "captcha") throw new PmaiError("CAPTCHA_REQUIRED", "CAPTCHA — mở đúng hồ sơ.");
@@ -590,23 +725,23 @@ export class PmaiEngine {
       if (!urlOk && !nameOk) {
         throw new PmaiError("ACCOUNT_MISMATCH", `Sai đích đăng (${destType(page)}).`);
       }
-      if (this.selectedPage()?.url !== page.url) {
-        throw new PmaiError("ACCOUNT_MISMATCH", "Sai URL đích đã chọn.");
-      }
       this.log("publish.stage", "OK", "DESTINATION_OPENED", t.id);
 
       this.log("publish.stage", "RUNNING", "COMPOSER_OPEN", t.id);
+      await this.pauseLikeHuman(adapter, "trước khi mở composer", t.id);
       await adapter.click({ name: "composer" });
       this.log("publish.stage", "OK", "COMPOSER_OPENED", t.id);
       const caption = sanitizeComposerBody(c.body) || c.body;
       const files = uploadPaths(c.media, requirePath);
       if (files.length) {
         this.log("media.upload", "RUNNING", files.map((f) => f.split(/[/\\]/).pop()).join(", "), t.id);
+        await this.pauseLikeHuman(adapter, "trước khi gắn media", t.id);
         await adapter.upload(files);
         this.log("media.upload", "OK", String(files.length), t.id);
         this.log("publish.stage", "OK", "MEDIA_UPLOADED", t.id);
       }
       this.log("publish.stage", "OK", "CONTENT_READY", t.id);
+      await this.pauseLikeHuman(adapter, "trước khi gõ caption", t.id);
       await adapter.type({ role: "textbox", name: "composer" }, caption);
 
       const preview = await adapter.observe();
@@ -620,6 +755,7 @@ export class PmaiEngine {
       }
 
       this.log("publish.stage", "RUNNING", "PUBLISH_READY", t.id);
+      await this.pauseLikeHuman(adapter, "trước khi Đăng", t.id);
       try {
         const published = await adapter.publish({
           destinationType: destType(page),
@@ -678,7 +814,44 @@ export class PmaiEngine {
       this.log("task.fail", t.status, e instanceof Error ? e.message : "fail", t.id);
       this.persist();
       throw e;
+    } finally {
+      this.runningSessionIds.delete(sessionKey);
+      if (openedDest) {
+        await this.returnHome(adapter, page.url, t.id);
+      }
     }
+  }
+
+  async executeQueuedForSession(sessionId: string, browser?: BrowserAdapter) {
+    const s = this.state.sessions.find((x) => x.id === sessionId);
+    if (!s) throw new PmaiError("NOT_READY", "Không thấy session.");
+    const pageIds = new Set(s.pages.map((p) => p.id));
+    const queued = this.state.tasks.filter((t) => t.status === "QUEUED" && pageIds.has(t.pageTargetId));
+    const results = [];
+    for (const t of queued) {
+      s.selectedPageId = t.pageTargetId;
+      s.pages = s.pages.map((p) => ({
+        ...p,
+        status: p.id === t.pageTargetId ? "VERIFIED" : p.status,
+      }));
+      if (this.state.activeSessionId === s.id) this.syncActiveFromSession();
+      try {
+        results.push(await this.executeTask(t.id, browser));
+      } catch {
+        results.push(this.state.tasks.find((x) => x.id === t.id) ?? t);
+      }
+    }
+    return results;
+  }
+
+  async executeEnabledSessions(adapterFor: (sessionId: string) => BrowserAdapter) {
+    const enabled = this.state.sessions.filter((s) => s.enabled && s.identity?.sessionStatus === "CONNECTED");
+    const settled = await Promise.all(
+      enabled.map((s) => this.executeQueuedForSession(s.id, adapterFor(s.id))),
+    );
+    this.log("workspace.run", "OK", `${enabled.length} session`);
+    this.persist();
+    return settled.flat();
   }
 
   confirmVerification(taskId: string, found: boolean) {
@@ -817,12 +990,40 @@ function emptyWorkspace(): WorkspaceState {
     identity: null,
     pages: [],
     selectedPageId: null,
+    sessions: [],
+    activeSessionId: null,
     contents: [],
     tasks: [],
     approvals: [],
     activities: [],
     firstRunStep: 1,
   };
+}
+
+function migrateSessions(parsed: Partial<WorkspaceState>): WorkspaceSession[] {
+  if (Array.isArray(parsed.sessions) && parsed.sessions.length) {
+    return parsed.sessions.map((s) => ({
+      id: s.id,
+      enabled: s.enabled !== false,
+      profile: s.profile,
+      identity: s.identity ?? null,
+      pages: (s.pages ?? []).map((p) => ({ ...p, type: destType(p) })),
+      selectedPageId: s.selectedPageId ?? null,
+    }));
+  }
+  if (parsed.profile) {
+    return [
+      {
+        id: parsed.profile.id,
+        enabled: true,
+        profile: parsed.profile,
+        identity: parsed.identity ?? null,
+        pages: (parsed.pages ?? []).map((p) => ({ ...p, type: destType(p) })),
+        selectedPageId: parsed.selectedPageId ?? null,
+      },
+    ];
+  }
+  return [];
 }
 
 export function createEngine(deps?: EngineDeps) {

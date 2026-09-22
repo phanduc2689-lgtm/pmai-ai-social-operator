@@ -1,3 +1,11 @@
+# PMAI 1.3.0 — 2026-09-22
+
+Luồng đăng PROFILE / PAGE / GROUP **khóa** — không sửa locator.
+
+- Delay người thật **10–15 giây** giữa mọi bước đăng (cá nhân, fanpage ảnh, fanpage video, group). Test vẫn `humanPauseMs: 0`.
+- Sau SUCCESS / NEEDS_VERIFICATION / FAILED: Chrome tự về **trang chủ đích** (fanpage / group / trang cá nhân).
+- Không gian làm việc nhiều session: mỗi session = 1 hồ sơ Chrome = 1 tài khoản Facebook. Tick session để chạy. PMAI mở **nhiều cửa sổ Chrome cùng lúc**, mỗi cửa sổ một CDP port riêng. Task trong một account vẫn tuần tự.
+
 # PMAI 1.2.11 — 2026-09-22
 
 Chỉ **Fanpage + video**. Ảnh Fanpage / Profile / Group không đổi.

@@ -165,6 +165,15 @@ export interface LlmSettingsPublic {
   lastPing: string | null;
 }
 
+export interface WorkspaceSession {
+  id: string;
+  enabled: boolean;
+  profile: BrowserProfile;
+  identity: FacebookIdentity | null;
+  pages: PageTarget[];
+  selectedPageId: string | null;
+}
+
 export interface WorkspaceState {
   id: string;
   name: string;
@@ -176,10 +185,14 @@ export interface WorkspaceState {
   idleCloseMinutes: number;
   keepBrowserOpen: boolean;
   llm: LlmSettingsPublic;
+  /** Active session mirror — keep for existing UI / persist v2. */
   profile: BrowserProfile | null;
   identity: FacebookIdentity | null;
   pages: PageTarget[];
   selectedPageId: string | null;
+  /** Each session = one Chrome profile = one Facebook account. */
+  sessions: WorkspaceSession[];
+  activeSessionId: string | null;
   contents: ContentItem[];
   tasks: Task[];
   approvals: Approval[];

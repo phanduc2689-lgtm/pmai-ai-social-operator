@@ -3,7 +3,7 @@ import { Check, CircleAlert, Download, Trash2 } from "lucide-react";
 import { PmaiLogo } from "@/components/pmai-logo.tsx";
 import { destGlyph, destKindLabel, destType } from "@/lib/pmai/dest.ts";
 import { downloadPublicFile } from "@/lib/pmai/download.ts";
-import { hasElectronHost } from "@/lib/pmai/ipc.ts";
+import { hasElectronHost, hostInvoke } from "@/lib/pmai/ipc.ts";
 import type { DestinationType } from "@/lib/pmai/types.ts";
 import type { usePmai } from "@/lib/pmai/use-pmai.ts";
 
@@ -16,6 +16,22 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
   const [picker, setPicker] = useState<null | DestinationType>(null);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("https://www.facebook.com/");
+  const [newSessionName, setNewSessionName] = useState("");
+
+  const sessions = snap.sessions.length
+    ? snap.sessions
+    : snap.profile
+      ? [
+          {
+            id: snap.profile.id,
+            enabled: true,
+            profile: snap.profile,
+            identity: snap.identity,
+            pages: snap.pages,
+            selectedPageId: snap.selectedPageId,
+          },
+        ]
+      : [];
 
   async function submit() {
     if (!picker) return;
@@ -27,25 +43,101 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
     }
   }
 
+  async function addChromeSession() {
+    const label = newSessionName.trim() || `Hồ sơ ${sessions.length + 1}`;
+    if (hasElectronHost()) {
+      const created = await hostInvoke<{ directory: string; displayName: string; userDataDir: string; facebookLikely?: boolean }>(
+        "chrome.createProfile",
+        { displayName: label },
+      );
+      if (!created.ok || !created.data) {
+        api.setToast(created.error?.message ?? "Không tạo được hồ sơ Chrome");
+        return;
+      }
+      await api.createProfile(created.data.displayName || label, "MANAGED_PROFILE", {
+        chromeDirectory: created.data.directory,
+        userDataDir: created.data.userDataDir,
+        facebookLikely: created.data.facebookLikely,
+      });
+      await hostInvoke("chrome.autoConnect", {
+        directory: created.data.directory,
+        profileId: created.data.directory,
+        reuse: true,
+      });
+    } else {
+      await api.createProfile(label, "MANAGED_PROFILE");
+    }
+    setNewSessionName("");
+  }
+
   return (
     <section className="mx-auto max-w-2xl">
-      <h1 className="font-serif text-3xl">Tài khoản</h1>
-      <p className="mt-2 text-sm text-muted">Chrome profile → tài khoản Facebook → đích đăng. Không lưu mật khẩu. Không copy cookie.</p>
+      <h1 className="font-serif text-3xl">Không gian làm việc</h1>
+      <p className="mt-2 text-sm text-muted">
+        Mỗi session là một hồ sơ Chrome = một tài khoản Facebook. Chọn session để chạy — PMAI mở nhiều cửa sổ Chrome cùng lúc, mỗi cửa sổ một account.
+      </p>
+
       <div className="mt-6 space-y-3">
-        <div className="rounded-xl border border-border bg-surface p-4">
-          <p className="text-xs text-subtle">Hồ sơ Chrome</p>
-          <p className="font-medium">
-            {snap.profile?.name ?? "—"} ({snap.profile?.mode ?? "—"})
-          </p>
-          {snap.profile?.chromeDirectory ? <p className="text-xs text-muted">{snap.profile.chromeDirectory}</p> : null}
-        </div>
-        <div className="rounded-xl border border-border bg-surface p-4">
-          <p className="text-xs text-subtle">Facebook Identity</p>
-          <p className="font-medium">{snap.identity?.displayName ?? "—"}</p>
-          <p className="text-xs text-muted">{snap.identity?.sessionStatus ?? "UNKNOWN"} · Trang cá nhân đang login</p>
+        {sessions.map((s) => {
+          const on = s.id === snap.activeSessionId || (!snap.activeSessionId && s.id === snap.profile?.id);
+          return (
+            <div
+              key={s.id}
+              className={`rounded-xl border p-4 ${on ? "border-accent bg-info-bg" : "border-border bg-surface"}`}
+            >
+              <div className="flex items-start gap-3">
+                <label className="mt-1 flex size-11 items-center justify-center">
+                  <input
+                    type="checkbox"
+                    className="size-4"
+                    checked={s.enabled}
+                    onChange={(e) => api.toggleSession(s.id, e.target.checked)}
+                    aria-label={`Chọn session ${s.profile.name}`}
+                  />
+                </label>
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => api.selectSession(s.id)}>
+                  <p className="font-medium">{s.profile.name}</p>
+                  <p className="text-xs text-muted">
+                    {s.identity?.displayName ?? "Chưa đăng nhập"} · {s.identity?.sessionStatus ?? "UNKNOWN"} · {s.pages.length}{" "}
+                    đích
+                  </p>
+                  {s.profile.chromeDirectory ? <p className="text-xs text-subtle">{s.profile.chromeDirectory}</p> : null}
+                </button>
+                {on ? <Check className="size-4 shrink-0" /> : null}
+                <button
+                  type="button"
+                  className="h-11 shrink-0 rounded-md border border-border px-3 text-xs"
+                  onClick={() => api.launchSession(s.id)}
+                >
+                  Mở Chrome
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="rounded-xl border border-dashed border-border bg-surface p-4">
+          <p className="text-sm font-medium">+ Thêm session / hồ sơ Chrome</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input
+              className="h-11 min-w-40 flex-1 rounded-md border border-border px-3 text-sm"
+              placeholder="Tên hồ sơ mới"
+              value={newSessionName}
+              onChange={(e) => setNewSessionName(e.target.value)}
+            />
+            <button type="button" className="h-11 rounded-md bg-accent px-4 text-sm text-accent-fg" onClick={() => void addChromeSession()}>
+              Tạo session
+            </button>
+          </div>
         </div>
 
-        <p className="pt-2 text-xs font-medium uppercase tracking-wide text-subtle">Đích Facebook</p>
+        {sessions.filter((s) => s.enabled).length > 0 && snap.tasks.some((t) => t.status === "QUEUED") ? (
+          <button type="button" className="h-12 w-full rounded-md bg-accent text-sm font-medium text-accent-fg" onClick={() => api.executeEnabled()}>
+            Chạy {sessions.filter((s) => s.enabled).length} session đã chọn
+          </button>
+        ) : null}
+
+        <p className="pt-2 text-xs font-medium uppercase tracking-wide text-subtle">Đích Facebook của session đang chọn</p>
         {snap.pages.map((p) => {
           const kind = destType(p);
           const on = p.id === snap.selectedPageId;
@@ -192,7 +284,7 @@ export function Logs({ api }: { api: ReturnType<typeof usePmai> }) {
 export function HelpScreen() {
   const steps = [
     ["1. Cài bản thật trên Windows", "Clone GitHub rồi chạy CAI-DAT-WINDOWS.bat. Preview web không gắn được Chrome của bạn."],
-    ["2. Hồ sơ Chrome", "App tự quét User Data, chọn sẵn hồ sơ đã login Facebook, rồi kết nối CDP. Đóng hết Chrome nếu bị khóa hồ sơ."],
+    ["2. Hồ sơ Chrome", "Mỗi tài khoản Facebook một hồ sơ PMAI / một cửa sổ Chrome. Tài khoản → thêm session, tick để chạy nhiều cửa sổ cùng lúc."],
     ["3. Đăng nhập", "Nếu Facebook đã login, bước này tự xong. Nếu thấy màn login: login tay trên cửa sổ Chrome."],
     ["4. Chọn đích đăng", "Tài khoản → Thêm đích: Trang cá nhân, Fanpage, hoặc Group. Không gộp 3 loại thành một «Trang»."],
     ["5. Soạn nháp", "Tạo bài đăng → Soạn bản nháp. Sửa chữ, thêm ảnh local. Chưa mở composer Facebook."],

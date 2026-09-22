@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { describe, it } = require("node:test");
-const { isComposerCue } = require("./playwright-adapter.cjs");
+const { isComposerCue, sessionCount } = require("./playwright-adapter.cjs");
 
 describe("composer cues", () => {
   it("matches profile, page, group, and English placeholders", () => {
@@ -26,5 +26,11 @@ describe("composer cues", () => {
     assert.equal(isComposerCue("Share your thoughts"), false);
     assert.equal(isComposerCue("Bạn đang nghĩ gì?"), true);
     assert.equal(isComposerCue("Bạn viết gì đi..."), true);
+  });
+});
+
+describe("session pool", () => {
+  it("starts with zero live Chrome sessions", () => {
+    assert.equal(sessionCount(), 0);
   });
 });

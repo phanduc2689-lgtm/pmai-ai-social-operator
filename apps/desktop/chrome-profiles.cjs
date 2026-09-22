@@ -80,6 +80,14 @@ function writeRegistry(profiles) {
   fs.writeFileSync(registryPath(), JSON.stringify({ version: 1, profiles }, null, 2));
 }
 
+function nextCdpPort(existing = readRegistry()) {
+  const used = new Set(existing.map((r) => Number(r.cdpPort) || 0).filter(Boolean));
+  for (let p = 9222; p < 9422; p++) {
+    if (!used.has(p)) return p;
+  }
+  return 9222 + existing.length;
+}
+
 function hydrate(row) {
   const userDataDir = row.userDataDir;
   return {
@@ -110,19 +118,19 @@ function getProfile(id) {
 }
 
 function createPmaiProfile(displayName) {
+  const all = readRegistry();
   const id = `pmai-${crypto.randomBytes(4).toString("hex")}`;
   const userDataDir = path.join(profilesRoot(), id);
   fs.mkdirSync(path.join(userDataDir, "Default"), { recursive: true });
   const row = {
     id,
-    displayName: String(displayName || "H\u1ed3 s\u01a1 PMAI").trim() || "H\u1ed3 s\u01a1 PMAI",
+    displayName: String(displayName || "Hồ sơ PMAI").trim() || "Hồ sơ PMAI",
     userDataDir,
     createdAt: new Date().toISOString(),
     lastUsedAt: null,
-    cdpPort: 9222,
+    cdpPort: nextCdpPort(all),
     clonedFrom: null,
   };
-  const all = readRegistry();
   all.push(row);
   writeRegistry(all);
   return hydrate(row);
@@ -133,16 +141,16 @@ const SKIP_COPY = new Set(["SingletonLock", "SingletonSocket", "SingletonCookie"
 function clonePmaiProfile(sourceId, displayName) {
   const src = getProfile(sourceId);
   if (!src) {
-    const e = new Error("Kh\u00f4ng th\u1ea5y h\u1ed3 s\u01a1 ngu\u1ed3n \u0111\u1ec3 copy session.");
+    const e = new Error("Không thấy hồ sơ nguồn để copy session.");
     e.code = "NOT_READY";
     throw e;
   }
   if (src.locked) {
-    const e = new Error("H\u1ed3 s\u01a1 ngu\u1ed3n \u0111ang m\u1edf. \u0110\u00f3ng c\u1eeda s\u1ed5 Chrome r\u1ed3i copy session.");
+    const e = new Error("Hồ sơ nguồn đang mở. Đóng cửa sổ Chrome rồi copy session.");
     e.code = "IDLE_BLOCKED";
     throw e;
   }
-  const created = createPmaiProfile(displayName || `${src.displayName} (b\u1ea3n sao)`);
+  const created = createPmaiProfile(displayName || `${src.displayName} (bản sao)`);
   try {
     fs.cpSync(src.userDataDir, created.userDataDir, {
       recursive: true,
@@ -185,4 +193,5 @@ module.exports = {
   touchProfile,
   detectFacebook,
   isLocked,
+  nextCdpPort,
 };
