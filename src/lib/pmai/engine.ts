@@ -292,9 +292,9 @@ export class PmaiEngine {
       return;
     }
     if (!(adapter.kind === "fake" || adapter instanceof FakeBrowserAdapter)) {
-      const ms = this.forcedHumanPauseMs != null ? Math.max(0, this.forcedHumanPauseMs) : 30_000;
+      const ms = this.forcedHumanPauseMs != null ? Math.max(0, this.forcedHumanPauseMs) : 5_000;
       if (ms) {
-        this.log("publish.stage", "OK", `HUMAN_PAUSE ${Math.round(ms / 1000)}s · sau SUCCESS, trước về trang chủ`, taskId);
+        this.log("publish.stage", "OK", `HUMAN_PAUSE ${Math.round(ms / 1000)}s · sau SUCCESS, trước về trang chủ Facebook`, taskId);
         await new Promise((r) => setTimeout(r, ms));
       }
     }

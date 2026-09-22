@@ -1,3 +1,11 @@
+# PMAI 1.3.3 — 2026-09-22
+
+Luồng đăng bị gãy: `media.hasComposerMediaPreview is not a function` — Electron chạy bản media-upload cũ trong dist-main.
+
+- Khôi phục media-upload đã freeze (preview «Chỉnh sửa» / ảnh trong composer).
+- Locator đăng PROFILE / PAGE / GROUP không đổi.
+- Sau nhật ký SUCCESS: chờ **5 giây** rồi về trang chủ Facebook. Còn bước tiếp theo thì không về.
+
 # PMAI 1.3.2 — 2026-09-22
 
 Return Facebook **sai bước**: không nhảy về trang chủ lúc đang đăng.

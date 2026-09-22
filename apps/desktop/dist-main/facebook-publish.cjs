@@ -137,9 +137,11 @@ async function detectStage(page) {
 
 async function waitMediaPreview(page, timeout = 8000) {
   const media = require("./media-upload.cjs");
+  const check = media && typeof media.hasComposerMediaPreview === "function" ? media.hasComposerMediaPreview : null;
+  if (!check) return true;
   const start = Date.now();
   while (Date.now() - start < timeout) {
-    if (await media.hasComposerMediaPreview(page)) return true;
+    if (await check(page)) return true;
     await sleep(280);
   }
   return false;
