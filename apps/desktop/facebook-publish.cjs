@@ -442,45 +442,43 @@ function inPageHasMessengerCta() {
       .replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-  const texts = [...document.querySelectorAll("h1,h2,h3,h4,span,div,button,[role='button'],[role='heading']")].map((el) =>
-    norm(el.innerText || el.textContent),
-  );
-  if (texts.some((t) => t === "Chat trực tiếp với khách hàng" || /^chat with customers$/i.test(t))) return true;
-  const hasLater = texts.some((t) => /^(lúc khác|later|not now)$/i.test(t));
-  const hasAdd = texts.some((t) => /^(thêm nút|add button)$/i.test(t));
-  return hasLater && hasAdd;
+  const nodes = [...document.querySelectorAll("h1,h2,h3,h4,span,div,button,[role='button'],[role='heading']")];
+  for (const el of nodes) {
+    const t = norm(el.innerText || el.textContent);
+    if (t === "Chat trực tiếp với khách hàng" || t === "Chat with customers") {
+      const r = el.getBoundingClientRect();
+      if (r.width > 4 && r.height > 4) return true;
+    }
+  }
+  let later = false;
+  let add = false;
+  for (const el of nodes) {
+    const t = norm(el.innerText || el.textContent);
+    if (t === "Lúc khác" || t === "Later" || t === "Not now") later = true;
+    if (t === "Thêm nút" || t === "Add button") add = true;
+  }
+  return later && add;
 }
 
-function inPageClickLucKhac() {
-  const norm = (s) =>
-    String(s || "")
-      .replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  const isLater = (s) => /^(lúc khác|later|not now|maybe later)$/i.test(norm(s));
-  const nodes = [...document.querySelectorAll("button, [role='button'], [tabindex], a, span, div")];
-  const hits = [];
-  for (const el of nodes) {
-    if (!(el instanceof HTMLElement)) continue;
-    const st = window.getComputedStyle(el);
-    if (st.display === "none" || st.visibility === "hidden" || Number(st.opacity) === 0) continue;
-    const aria = norm(el.getAttribute("aria-label") || "");
-    const own = norm(
-      [...el.childNodes]
-        .filter((n) => n.nodeType === 3)
-        .map((n) => n.textContent)
-        .join(" "),
-    );
-    const text = norm(el.innerText || el.textContent);
-    if (text.length > 32 && !isLater(aria)) continue;
-    if (isLater(own) || isLater(text) || isLater(aria)) hits.push(el);
+async function mouseClickBox(page, loc) {
+  try {
+    if (!(await loc.isVisible({ timeout: 400 }))) return false;
+    const box = await loc.boundingBox();
+    if (!box || box.width < 6 || box.height < 6) return false;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { delay: 30 });
+    return true;
+  } catch {
+    return false;
   }
-  if (!hits.length) return { ok: false };
-  hits.sort((a, b) => norm(a.innerText).length - norm(b.innerText).length);
-  const leaf = hits[0];
-  const target = leaf.closest("button, [role='button'], a, [tabindex='0']") || leaf;
-  target.click();
-  return { ok: true, text: norm(target.innerText || target.getAttribute("aria-label")).slice(0, 24) };
+}
+
+function messengerPopupLocator(page) {
+  const title = page.getByText("Chat trực tiếp với khách hàng", { exact: true });
+  return page
+    .locator('[role="dialog"], [aria-modal="true"], [role="alertdialog"], div')
+    .filter({ has: title })
+    .filter({ has: page.getByText("Lúc khác", { exact: true }).or(page.getByText("Thêm nút", { exact: true })) })
+    .last();
 }
 
 async function hasPageMessengerCtaPopup(page) {
@@ -491,59 +489,78 @@ async function hasPageMessengerCtaPopup(page) {
       /* cross-origin */
     }
   }
-  if (await visible(page.getByText("Chat trực tiếp với khách hàng", { exact: true }).first(), 200)) return true;
-  const later = page.getByText("Lúc khác", { exact: true });
-  const add = page.getByText("Thêm nút", { exact: true });
-  return (await visible(later.first(), 150)) && (await visible(add.first(), 150));
+  return visible(page.getByText("Chat trực tiếp với khách hàng", { exact: true }).first(), 250);
 }
 
-/** Fanpage-only: dismiss «Chat trực tiếp với khách hàng» via exact «Lúc khác». Never «Thêm nút». */
-async function dismissPageComposerPrompts(page, timeout = 2500) {
+/**
+ * Fanpage: get past «Chat trực tiếp với khách hàng».
+ * Real mouse click on Lúc khác (React ignores DOM .click()). Then X, Escape.
+ * Only returns true when the popup is actually gone.
+ */
+async function dismissPageComposerPrompts(page, timeout = 6000) {
   const start = Date.now();
-  let dismissed = false;
-  while (Date.now() - start < timeout) {
-    let present = false;
-    try {
-      present = await hasPageMessengerCtaPopup(page);
-    } catch {
-      present = false;
-    }
-    if (!present) {
-      if (dismissed || Date.now() - start > 350) return dismissed;
-      await sleep(120);
-      continue;
-    }
-    let clicked = false;
-    for (const frame of framesOf(page)) {
+  if (!(await hasPageMessengerCtaPopup(page))) return false;
+
+  const tryPass = async () => {
+    const pop = messengerPopupLocator(page);
+    const laterLocs = [
+      pop.getByRole("button", { name: /^Lúc khác$|^Later$|^Not now$/ }),
+      pop.locator('[role="button"]').filter({ hasText: /^Lúc khác$|^Later$/ }),
+      pop.getByText("Lúc khác", { exact: true }),
+      page.getByRole("button", { name: /^Lúc khác$/ }),
+      page.getByText("Lúc khác", { exact: true }),
+    ];
+    for (const loc of laterLocs) {
+      if (await mouseClickBox(page, loc.last())) {
+        await sleep(350);
+        if (!(await hasPageMessengerCtaPopup(page))) return true;
+      }
       try {
-        const result = await frame.evaluate(inPageClickLucKhac);
-        if (result && result.ok) {
-          clicked = true;
-          break;
+        if (await loc.last().isVisible({ timeout: 200 })) {
+          await loc.last().click({ force: true, timeout: 1200 });
+          await sleep(350);
+          if (!(await hasPageMessengerCtaPopup(page))) return true;
         }
       } catch {
-        /* cross-origin */
+        /* next */
       }
     }
-    if (!clicked) {
-      const later = page.getByText("Lúc khác", { exact: true }).last();
-      if (await visible(later, 400)) {
-        try {
-          await later.click({ timeout: 1500, force: true });
-          clicked = true;
-        } catch {
-          /* next */
-        }
+
+    const closers = [
+      pop.locator('[aria-label="Đóng"], [aria-label="Close"], [aria-label="Đóng cửa sổ"]').first(),
+      pop.getByRole("button", { name: /^Đóng$|^Close$/ }),
+      page.locator('[aria-label="Đóng"]').last(),
+    ];
+    for (const loc of closers) {
+      if (await mouseClickBox(page, loc)) {
+        await sleep(350);
+        if (!(await hasPageMessengerCtaPopup(page))) return true;
       }
     }
-    if (clicked) {
-      dismissed = true;
-      await sleep(280);
-      continue;
+
+    try {
+      await page.keyboard.press("Escape");
+      await sleep(350);
+      if (!(await hasPageMessengerCtaPopup(page))) return true;
+    } catch {
+      /* ignore */
     }
-    await sleep(160);
+
+    const addBtn = pop.getByText("Thêm nút", { exact: true }).or(page.getByText("Thêm nút", { exact: true }));
+    if (await mouseClickBox(page, addBtn.last())) {
+      await sleep(400);
+      if (!(await hasPageMessengerCtaPopup(page))) return true;
+    }
+    return false;
+  };
+
+  while (Date.now() - start < timeout) {
+    if (!(await hasPageMessengerCtaPopup(page))) return true;
+    await tryPass();
+    if (!(await hasPageMessengerCtaPopup(page))) return true;
+    await sleep(250);
   }
-  return dismissed;
+  return !(await hasPageMessengerCtaPopup(page));
 }
 
 async function dialogHidden(page, timeout = 30000) {
@@ -729,18 +746,22 @@ async function publishPageComposer(page, opts = {}) {
 async function settlePagePublishAfterClick(page, mark) {
   const start = Date.now();
   let extraClicks = 0;
-  await sleep(500);
+  let dismissedOnce = false;
+  await sleep(400);
   while (Date.now() - start < 28000) {
-    const dismissed = await dismissPageComposerPrompts(page, 1800);
-    if (dismissed) mark("PAGE_CTA_DISMISSED", true, "Lúc khác sau Đăng");
+    if (await hasPageMessengerCtaPopup(page)) {
+      const gone = await dismissPageComposerPrompts(page, 5000);
+      if (gone && !dismissedOnce) {
+        mark("PAGE_CTA_DISMISSED", true, "Lúc khác sau Đăng");
+        dismissedOnce = true;
+      }
+      if (await hasPageMessengerCtaPopup(page)) {
+        await sleep(250);
+        continue;
+      }
+    }
 
     if (await verifyPublished(page)) return true;
-
-    const popup = await hasPageMessengerCtaPopup(page);
-    if (popup) {
-      await sleep(200);
-      continue;
-    }
 
     const stage = await detectStage(page);
     if ((stage === "POST_SETTINGS" || stage === "REEL_SETTINGS") && extraClicks < 3) {
@@ -748,7 +769,7 @@ async function settlePagePublishAfterClick(page, mark) {
       if (again) {
         extraClicks += 1;
         mark("PUBLISH_CLICKED", true, "click lần " + (extraClicks + 1));
-        await sleep(600);
+        await sleep(700);
         continue;
       }
     }

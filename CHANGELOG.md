@@ -1,3 +1,16 @@
+# PMAI 1.2.10 — 2026-09-22
+
+Fanpage popup «Chat trực tiếp với khách hàng»: Facebook React **không nhận** `element.click()`. Log cũ «Lúc khác sau Đăng» lặp 13 lần nhưng popup vẫn còn.
+
+Cách thoát popup:
+1. Click chuột thật vào **Lúc khác**
+2. Nút **X / Đóng**
+3. Phím **Escape**
+4. Cuối cùng **Thêm nút** nếu vẫn kẹt
+Chỉ tính thành công khi popup **đã biến**. Rồi bấm Đăng lại.
+
+Profile / Group không đổi.
+
 # PMAI 1.2.9 — 2026-09-22
 
 Fanpage: popup «Chat trực tiếp với khách hàng» hiện **ngay khi bấm Đăng** (và có thể sau Tiếp). Không đợi modal đóng 30s.

@@ -342,4 +342,44 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
       assert.ok(steps.filter((s) => s === "publish").length >= 2);
     });
   });
+
+  it("PAGE: Lúc khác only dismisses with a real mouse click (React ignores DOM click)", async () => {
+    await withChromium(async (browser) => {
+      const { publishFromComposer } = require("./facebook-publish.cjs");
+      const page = await browser.newPage();
+      await page.setContent(`<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"></head>
+<body>
+  <div id="settings" role="dialog" aria-modal="true">
+    <h2>Cài đặt bài viết</h2>
+    <div id="save" role="button" tabindex="0">Lưu</div>
+    <div id="publish" role="button" tabindex="0">Đăng</div>
+  </div>
+  <div id="cta" role="dialog" aria-modal="true" style="position:fixed;inset:15% 20%;background:#fff;z-index:20;padding:24px">
+    <h2>Chat trực tiếp với khách hàng</h2>
+    <div id="laterWrap" role="button" tabindex="0" style="display:inline-block;padding:12px 20px;color:#1877f2">
+      <span id="later">Lúc khác</span>
+    </div>
+    <div id="add" role="button" tabindex="0" style="display:inline-block;padding:12px 20px;background:#1877f2;color:#fff">Thêm nút</div>
+  </div>
+  <script>
+    window.__cta = null;
+    document.getElementById("later").addEventListener("click", (e) => { e.stopPropagation(); });
+    document.getElementById("laterWrap").addEventListener("mousedown", () => {
+      window.__cta = "later";
+      document.getElementById("cta").remove();
+    });
+    document.getElementById("add").addEventListener("click", () => { window.__cta = "add"; });
+    document.getElementById("publish").addEventListener("click", () => {
+      if (document.getElementById("cta")) return;
+      window.__cta = window.__cta === "later" ? "publish" : window.__cta;
+      document.getElementById("settings").remove();
+    });
+  </script>
+</body></html>`);
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE" });
+      assert.equal(result.ok, true);
+      assert.equal(await page.evaluate(() => window.__cta), "publish");
+    });
+  });
 });
