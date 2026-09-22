@@ -44,6 +44,8 @@ export interface BrowserAdapter {
   publish(opts?: { destinationType?: DestinationType; hasMedia?: boolean; hasVideo?: boolean }): Promise<PublishResult>;
   screenshot(): Promise<string>;
   close(): Promise<void>;
+  scrapeGroup?(input: { url: string; maxScrolls?: number; maxPosts?: number }): Promise<{ author?: string; text: string; permalink?: string | null }[]>;
+  commentOnPost?(input: { snippet: string; text: string; submit: boolean; permalink?: string | null }): Promise<{ ok: boolean; typed: boolean; submitted: boolean }>;
   calls: BrowserCall[];
 }
 
@@ -140,6 +142,20 @@ export class FakeBrowserAdapter implements BrowserAdapter {
   async screenshot() {
     this.calls.push({ method: "screenshot", args: [] });
     return "data:image/png;base64,fake";
+  }
+
+  async scrapeGroup(input: { url: string; maxScrolls?: number; maxPosts?: number }) {
+    this.calls.push({ method: "scrapeGroup", args: [input] });
+    return [
+      { author: "Lan", text: "Mọi người ơi cho hỏi tour Sapa 2 ngày 1 đêm nào ổn, đi cuối tuần này?", permalink: `${input.url}/posts/demo1` },
+      { author: "Shop", text: "Inbox em ngay hotline đặt combo giá sốc toàn quốc", permalink: `${input.url}/posts/demo2` },
+    ];
+  }
+
+  async commentOnPost(input: { snippet: string; text: string; submit: boolean; permalink?: string | null }) {
+    this.calls.push({ method: "commentOnPost", args: [input] });
+    this.typed = input.text;
+    return { ok: true, typed: true, submitted: Boolean(input.submit) };
   }
 
   async close() {
