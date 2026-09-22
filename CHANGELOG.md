@@ -1,3 +1,13 @@
+# PMAI 1.2.9 — 2026-09-22
+
+Fanpage: popup «Chat trực tiếp với khách hàng» hiện **ngay khi bấm Đăng** (và có thể sau Tiếp). Không đợi modal đóng 30s.
+
+- Bấm **Lúc khác** (không Thêm nút)
+- Bấm **Đăng** lại
+- Cùng xử lý nếu popup hiện sau Tiếp
+
+Profile / Group không đổi.
+
 # PMAI 1.2.8 — 2026-09-22
 
 Chỉ **Fanpage**. Profile / Group không đổi.

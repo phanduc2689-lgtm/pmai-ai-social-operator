@@ -436,13 +436,65 @@ async function clickExactPublish(page) {
   return false;
 }
 
+function inPageHasMessengerCta() {
+  const norm = (s) =>
+    String(s || "")
+      .replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const texts = [...document.querySelectorAll("h1,h2,h3,h4,span,div,button,[role='button'],[role='heading']")].map((el) =>
+    norm(el.innerText || el.textContent),
+  );
+  if (texts.some((t) => t === "Chat trực tiếp với khách hàng" || /^chat with customers$/i.test(t))) return true;
+  const hasLater = texts.some((t) => /^(lúc khác|later|not now)$/i.test(t));
+  const hasAdd = texts.some((t) => /^(thêm nút|add button)$/i.test(t));
+  return hasLater && hasAdd;
+}
+
+function inPageClickLucKhac() {
+  const norm = (s) =>
+    String(s || "")
+      .replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const isLater = (s) => /^(lúc khác|later|not now|maybe later)$/i.test(norm(s));
+  const nodes = [...document.querySelectorAll("button, [role='button'], [tabindex], a, span, div")];
+  const hits = [];
+  for (const el of nodes) {
+    if (!(el instanceof HTMLElement)) continue;
+    const st = window.getComputedStyle(el);
+    if (st.display === "none" || st.visibility === "hidden" || Number(st.opacity) === 0) continue;
+    const aria = norm(el.getAttribute("aria-label") || "");
+    const own = norm(
+      [...el.childNodes]
+        .filter((n) => n.nodeType === 3)
+        .map((n) => n.textContent)
+        .join(" "),
+    );
+    const text = norm(el.innerText || el.textContent);
+    if (text.length > 32 && !isLater(aria)) continue;
+    if (isLater(own) || isLater(text) || isLater(aria)) hits.push(el);
+  }
+  if (!hits.length) return { ok: false };
+  hits.sort((a, b) => norm(a.innerText).length - norm(b.innerText).length);
+  const leaf = hits[0];
+  const target = leaf.closest("button, [role='button'], a, [tabindex='0']") || leaf;
+  target.click();
+  return { ok: true, text: norm(target.innerText || target.getAttribute("aria-label")).slice(0, 24) };
+}
+
 async function hasPageMessengerCtaPopup(page) {
-  if (await visible(page.getByText("Chat trực tiếp với khách hàng", { exact: true }).first(), 280)) return true;
+  for (const frame of framesOf(page)) {
+    try {
+      if (await frame.evaluate(inPageHasMessengerCta)) return true;
+    } catch {
+      /* cross-origin */
+    }
+  }
+  if (await visible(page.getByText("Chat trực tiếp với khách hàng", { exact: true }).first(), 200)) return true;
   const later = page.getByText("Lúc khác", { exact: true });
   const add = page.getByText("Thêm nút", { exact: true });
-  if ((await visible(later.first(), 200)) && (await visible(add.first(), 200))) return true;
-  if (await visible(page.getByText(/add a ["“]?send message["”]? button/i).first(), 200)) return true;
-  return false;
+  return (await visible(later.first(), 150)) && (await visible(add.first(), 150));
 }
 
 /** Fanpage-only: dismiss «Chat trực tiếp với khách hàng» via exact «Lúc khác». Never «Thêm nút». */
@@ -450,29 +502,46 @@ async function dismissPageComposerPrompts(page, timeout = 2500) {
   const start = Date.now();
   let dismissed = false;
   while (Date.now() - start < timeout) {
-    if (!(await hasPageMessengerCtaPopup(page))) {
-      if (dismissed || Date.now() - start > 400) return dismissed;
-      await sleep(150);
+    let present = false;
+    try {
+      present = await hasPageMessengerCtaPopup(page);
+    } catch {
+      present = false;
+    }
+    if (!present) {
+      if (dismissed || Date.now() - start > 350) return dismissed;
+      await sleep(120);
       continue;
     }
-    const pop = page
-      .locator('[role="dialog"], [aria-modal="true"], [role="alertdialog"], [role="sheet"]')
-      .filter({ hasText: /chat trực tiếp với khách hàng|gửi tin nhắn|thêm nút|send message/i })
-      .last();
-    const byTitle = page.locator("div").filter({ has: page.getByText("Chat trực tiếp với khách hàng", { exact: true }) }).last();
-    const layer = (await visible(pop, 200)) ? pop : (await visible(byTitle, 200) ? byTitle : page);
-    const later = layer
-      .getByRole("button", { name: /^Lúc khác$|^Later$|^Not now$|^Maybe later$/ })
-      .or(layer.locator('[role="button"]').filter({ hasText: /^Lúc khác$|^Later$|^Not now$/ }))
-      .or(layer.getByText("Lúc khác", { exact: true }))
-      .or(layer.getByText("Later", { exact: true }));
-    if (await visible(later.last(), 500)) {
-      await safeClick(later.last());
+    let clicked = false;
+    for (const frame of framesOf(page)) {
+      try {
+        const result = await frame.evaluate(inPageClickLucKhac);
+        if (result && result.ok) {
+          clicked = true;
+          break;
+        }
+      } catch {
+        /* cross-origin */
+      }
+    }
+    if (!clicked) {
+      const later = page.getByText("Lúc khác", { exact: true }).last();
+      if (await visible(later, 400)) {
+        try {
+          await later.click({ timeout: 1500, force: true });
+          clicked = true;
+        } catch {
+          /* next */
+        }
+      }
+    }
+    if (clicked) {
       dismissed = true;
-      await sleep(250);
+      await sleep(280);
       continue;
     }
-    await sleep(180);
+    await sleep(160);
   }
   return dismissed;
 }
@@ -606,6 +675,8 @@ async function publishPageComposer(page, opts = {}) {
     const nextOk = await clickComposerNext(page);
     if (!nextOk) throw fail("UI_CHANGED", "Không thấy nút Tiếp trên modal Tạo bài viết.");
     mark("NEXT_CLICKED");
+    const skippedOnNext = await dismissPageComposerPrompts(page, 2000);
+    if (skippedOnNext) mark("PAGE_CTA_DISMISSED", true, "sau Tiếp");
     const after = await waitAnyStage(page, ["POST_SETTINGS", "REEL_EDITOR", "REEL_SETTINGS"], 20000);
     if (!after) {
       throw fail("UI_CHANGED", "Đã bấm Tiếp nhưng chưa thấy Cài đặt bài viết / Chỉnh sửa thước phim.");
@@ -615,6 +686,8 @@ async function publishPageComposer(page, opts = {}) {
       const reelNext = await clickComposerNext(page);
       if (!reelNext) throw fail("UI_CHANGED", "Không thấy nút Tiếp trên Chỉnh sửa thước phim.");
       mark("REEL_NEXT_CLICKED");
+      const skippedOnReel = await dismissPageComposerPrompts(page, 2000);
+      if (skippedOnReel) mark("PAGE_CTA_DISMISSED", true, "sau Tiếp thước phim");
       const settings = await waitAnyStage(page, ["REEL_SETTINGS", "POST_SETTINGS"], 20000);
       if (!settings) throw fail("UI_CHANGED", "Đã bấm Tiếp trên thước phim nhưng chưa thấy Cài đặt thước phim.");
       mark("POST_SETTINGS_OPEN", true, settings);
@@ -644,22 +717,44 @@ async function publishPageComposer(page, opts = {}) {
   mark("PUBLISH_BUTTON_FOUND");
   mark("PUBLISH_CLICKED");
 
-  const hidden = await dialogHidden(page, 30000);
-  mark("PUBLISH_PROCESSING", hidden, hidden ? "modal đóng" : "modal còn mở");
+  const settled = await settlePagePublishAfterClick(page, mark);
+  mark("PUBLISH_PROCESSING", settled, settled ? "modal đóng" : "modal còn mở");
 
-  if (!hidden) {
-    await dismissPageComposerPrompts(page, 2000);
-    const again = await clickExactPublish(page);
-    if (again) {
-      mark("PUBLISH_CLICKED", true, "click lần 2");
-      await dialogHidden(page, 20000);
-    }
-  }
-
-  const ok = await verifyPublished(page);
+  const ok = settled || (await verifyPublished(page));
   if (!ok) throw fail("NEEDS_VERIFICATION", "Đã bấm Đăng nhưng chưa xác nhận bài lên. Không auto-retry.");
   mark("PUBLISH_SUCCESS");
   return { ok: true, stage: "PUBLISHED", stages };
+}
+
+async function settlePagePublishAfterClick(page, mark) {
+  const start = Date.now();
+  let extraClicks = 0;
+  await sleep(500);
+  while (Date.now() - start < 28000) {
+    const dismissed = await dismissPageComposerPrompts(page, 1800);
+    if (dismissed) mark("PAGE_CTA_DISMISSED", true, "Lúc khác sau Đăng");
+
+    if (await verifyPublished(page)) return true;
+
+    const popup = await hasPageMessengerCtaPopup(page);
+    if (popup) {
+      await sleep(200);
+      continue;
+    }
+
+    const stage = await detectStage(page);
+    if ((stage === "POST_SETTINGS" || stage === "REEL_SETTINGS") && extraClicks < 3) {
+      const again = await clickExactPublish(page);
+      if (again) {
+        extraClicks += 1;
+        mark("PUBLISH_CLICKED", true, "click lần " + (extraClicks + 1));
+        await sleep(600);
+        continue;
+      }
+    }
+    await sleep(300);
+  }
+  return verifyPublished(page);
 }
 
 module.exports = {

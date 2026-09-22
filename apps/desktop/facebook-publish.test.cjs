@@ -294,4 +294,52 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
       assert.equal(await page.evaluate(() => window.__cta), "publish");
     });
   });
+
+  it("PAGE: popup appears after Đăng — click Lúc khác then Đăng again", async () => {
+    await withChromium(async (browser) => {
+      const { publishFromComposer } = require("./facebook-publish.cjs");
+      const page = await browser.newPage();
+      await page.setContent(`<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"></head>
+<body>
+  <div id="settings" role="dialog" aria-modal="true">
+    <h2>Cài đặt bài viết</h2>
+    <div id="save" role="button" tabindex="0">Lưu</div>
+    <div id="publish" role="button" tabindex="0">Đăng</div>
+  </div>
+  <script>
+    window.__steps = [];
+    function showCta() {
+      if (document.getElementById("cta")) return;
+      const wrap = document.createElement("div");
+      wrap.id = "cta";
+      wrap.setAttribute("role", "dialog");
+      wrap.innerHTML = '<h2>Chat trực tiếp với khách hàng</h2><span id="later">Lúc khác</span><span id="add">Thêm nút</span>';
+      document.body.appendChild(wrap);
+      document.getElementById("later").addEventListener("click", () => {
+        window.__steps.push("later");
+        wrap.remove();
+      });
+      document.getElementById("add").addEventListener("click", () => { window.__steps.push("add"); });
+    }
+    let published = false;
+    document.getElementById("publish").addEventListener("click", () => {
+      window.__steps.push("publish");
+      if (!published) {
+        published = true;
+        showCta();
+        return;
+      }
+      document.getElementById("settings").remove();
+    });
+  </script>
+</body></html>`);
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE" });
+      assert.equal(result.ok, true);
+      const steps = await page.evaluate(() => window.__steps);
+      assert.equal(steps.includes("later"), true);
+      assert.equal(steps.includes("add"), false);
+      assert.ok(steps.filter((s) => s === "publish").length >= 2);
+    });
+  });
 });
