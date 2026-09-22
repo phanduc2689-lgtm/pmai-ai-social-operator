@@ -519,6 +519,18 @@ async function screenshotPng(profileId) {
   return file;
 }
 
+async function scrapeGroup(opts = {}) {
+  const live = requireLive(opts.profileId);
+  const rpa = require("./facebook-group-rpa.cjs");
+  return rpa.scrapeGroupFeed(live.page, opts);
+}
+
+async function commentPost(opts = {}) {
+  const live = requireLive(opts.profileId);
+  const rpa = require("./facebook-group-rpa.cjs");
+  return rpa.commentOnVisiblePost(live.page, opts);
+}
+
 async function closeBrowser(profileId) {
   const id = resolveProfileId(profileId);
   const closeOne = async (key, live) => {
@@ -554,6 +566,8 @@ module.exports = {
   clickNamed,
   publishPost,
   screenshotPng,
+  scrapeGroup,
+  commentPost,
   closeBrowser,
   isCdpUp,
   isComposerCue,

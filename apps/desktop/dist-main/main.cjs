@@ -42,6 +42,8 @@ const ALLOWLIST = [
   "chrome.click",
   "chrome.publish",
   "chrome.screenshot",
+  "chrome.scrapeGroup",
+  "chrome.commentPost",
   "chrome.close",
   "workspace.get",
   "profile.create",
@@ -421,6 +423,28 @@ function registerIpc() {
     }),
   );
   handleOnce("chrome.screenshot", wrap(async (payload) => adapter().screenshotPng(pickDirectory(payload))));
+  handleOnce(
+    "chrome.scrapeGroup",
+    wrap(async (payload) => {
+      const body = payload || {};
+      body.profileId = pickDirectory(body);
+      if (typeof adapter().scrapeGroup !== "function") {
+        throw Object.assign(new Error("Adapter chua ho tro quet group."), { code: "CAPABILITY_MISSING" });
+      }
+      return adapter().scrapeGroup(body);
+    }),
+  );
+  handleOnce(
+    "chrome.commentPost",
+    wrap(async (payload) => {
+      const body = payload || {};
+      body.profileId = pickDirectory(body);
+      if (typeof adapter().commentPost !== "function") {
+        throw Object.assign(new Error("Adapter chua ho tro go comment."), { code: "CAPABILITY_MISSING" });
+      }
+      return adapter().commentPost(body);
+    }),
+  );
   handleOnce("chrome.close", wrap(async (payload) => adapter().closeBrowser(pickDirectory(payload))));
   for (const ch of ALLOWLIST) {
     handleOnce(ch, async () => ({
