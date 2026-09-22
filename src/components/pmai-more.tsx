@@ -59,11 +59,8 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
         userDataDir: created.data.userDataDir,
         facebookLikely: created.data.facebookLikely,
       });
-      await hostInvoke("chrome.autoConnect", {
-        directory: created.data.directory,
-        profileId: created.data.directory,
-        reuse: true,
-      });
+      const sid = api.engine.snapshot().activeSessionId || api.engine.snapshot().profile?.id;
+      if (sid) await api.launchSession(sid);
     } else {
       await api.createProfile(label, "MANAGED_PROFILE");
     }
@@ -104,14 +101,30 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
                   {s.profile.chromeDirectory ? <p className="text-xs text-subtle">{s.profile.chromeDirectory}</p> : null}
                 </button>
                 {on ? <Check className="size-4 shrink-0" /> : null}
-                <button
-                  type="button"
-                  className="h-11 shrink-0 rounded-md border border-border px-3 text-xs"
-                  onClick={() => api.launchSession(s.id)}
-                >
-                  Mở Chrome
-                </button>
+                <div className="flex shrink-0 flex-col gap-2">
+                  <button
+                    type="button"
+                    className="h-11 rounded-md border border-border px-3 text-xs"
+                    onClick={() => api.launchSession(s.id)}
+                  >
+                    Mở Chrome
+                  </button>
+                  {s.identity?.sessionStatus !== "CONNECTED" ? (
+                    <button
+                      type="button"
+                      className="h-11 rounded-md bg-accent px-3 text-xs text-accent-fg"
+                      onClick={() => api.confirmLogin(s.id)}
+                    >
+                      Tôi đã đăng nhập
+                    </button>
+                  ) : null}
+                </div>
               </div>
+              {s.identity?.sessionStatus !== "CONNECTED" ? (
+                <p className="mt-2 pl-14 text-xs text-muted">
+                  Mở Chrome của đúng hồ sơ này, login Facebook trên cửa sổ đó, rồi bấm «Tôi đã đăng nhập». PMAI không lấy mật khẩu.
+                </p>
+              ) : null}
             </div>
           );
         })}

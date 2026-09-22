@@ -163,6 +163,60 @@ export class PmaiEngine {
     return this.sessionOwningPage(t?.pageTargetId);
   }
 
+  sessionByChromeId(chromeId: string | null | undefined): WorkspaceSession | null {
+    if (!chromeId) return null;
+    return (
+      this.state.sessions.find(
+        (s) => s.profile.chromeDirectory === chromeId || s.profile.id === chromeId || s.id === chromeId,
+      ) ?? null
+    );
+  }
+
+  /**
+   * Chrome already shows a logged-in Facebook feed/profile/composer.
+   * Bind that observation onto the matching workspace session (does not seed demo pages).
+   */
+  applyChromeObservation(
+    chromeId: string | null | undefined,
+    obs: { url?: string; pageState?: string; pageName?: string | null } | null | undefined,
+  ): boolean {
+    if (!isFacebookLoggedIn(obs)) return false;
+    const s = this.sessionByChromeId(chromeId) ?? this.activeSession();
+    if (!s?.identity || !s.profile) return false;
+    const rawName = String(obs?.pageName || "")
+      .replace(/\s*\|\s*Facebook\s*$/i, "")
+      .trim();
+    const display =
+      rawName && !/^facebook$/i.test(rawName)
+        ? rawName
+        : s.identity.displayName && s.identity.displayName !== "Chưa đăng nhập"
+          ? s.identity.displayName
+          : s.profile.name;
+    let changed = false;
+    if (s.identity.sessionStatus !== "CONNECTED") {
+      s.identity.sessionStatus = "CONNECTED";
+      changed = true;
+    }
+    if (display && s.identity.displayName !== display) {
+      s.identity.displayName = display;
+      changed = true;
+    }
+    if (obs?.url && s.identity.profileUrl !== obs.url) {
+      s.identity.profileUrl = obs.url;
+      changed = true;
+    }
+    if (s.profile.status !== "RUNNING") {
+      s.profile.status = "RUNNING";
+      changed = true;
+    }
+    if (!changed) return false;
+    if (this.state.activeSessionId === s.id) this.syncActiveFromSession();
+    if (this.state.firstRunStep === 2) this.state.firstRunStep = 3;
+    this.log("session.connected", "OK", `${s.profile.name} · ${display}`);
+    this.persist();
+    return true;
+  }
+
   private commitActiveToSession() {
     const s = this.activeSession();
     if (!s) return;
@@ -893,6 +947,16 @@ export class PmaiEngine {
     if (!c) throw new PmaiError("NOT_READY", "Không có bản nháp.");
     return c;
   }
+}
+
+
+export function isFacebookLoggedIn(obs: { url?: string; pageState?: string } | null | undefined): boolean {
+  if (!obs) return false;
+  const url = String(obs.url || "");
+  const state = String(obs.pageState || "");
+  if (state === "login" || state === "captcha" || state === "checkpoint") return false;
+  if (/facebook\.com\/login/i.test(url)) return false;
+  return /facebook\.com/i.test(url);
 }
 
 export function namesLooselyMatch(observed: string, expected: string): boolean {

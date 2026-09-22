@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { FakeBrowserAdapter } from "./browser.ts";
+import { isFacebookLoggedIn } from "./engine.ts";
 import { isPmaiError } from "./errors.ts";
 import { HostBrowserAdapter } from "./host-browser.ts";
 import { getEngine } from "./host.ts";
@@ -242,9 +243,62 @@ export function usePmai() {
         refresh();
         return;
       }
-      const launched = await hostInvoke("chrome.autoConnect", { directory: dir, profileId: dir, reuse: true });
-      if (!launched.ok) setToast(launched.error?.message ?? "Không mở được Chrome");
+      const launched = await hostInvoke<{
+        observation?: { url?: string; pageState?: string; pageName?: string | null };
+        profile?: { id?: string; directory?: string };
+      }>("chrome.autoConnect", { directory: dir, profileId: dir, reuse: true });
+      if (!launched.ok) {
+        setToast(launched.error?.message ?? "Không mở được Chrome");
+        refresh();
+        return;
+      }
+      const obs = launched.data?.observation;
+      const chromeId = launched.data?.profile?.id || launched.data?.profile?.directory || dir;
+      const bound = engine.applyChromeObservation(chromeId, obs);
+      if (!bound && !isFacebookLoggedIn(obs)) {
+        setToast("Cửa sổ Chrome đã mở. Login Facebook trên đúng cửa sổ hồ sơ này, rồi bấm «Tôi đã đăng nhập».");
+      }
       refresh();
+    },
+    confirmLogin: async (sessionId: string) => {
+      await engine.selectSession(sessionId);
+      const s = engine.snapshot().sessions.find((x) => x.id === sessionId);
+      const dir = s?.profile.chromeDirectory || s?.profile.id;
+      if (!hasElectronHost()) {
+        engine.markLoggedIn(s?.identity?.displayName || s?.profile.name || "Facebook", { seedDemo: false });
+        refresh();
+        return;
+      }
+      if (!dir) {
+        setToast("Session chưa gắn hồ sơ Chrome.");
+        return;
+      }
+      let obs = await hostInvoke<{ url?: string; pageState?: string; pageName?: string | null; profileId?: string }>(
+        "chrome.observe",
+        { profileId: dir, directory: dir },
+      );
+      if (!obs.ok) {
+        const launched = await hostInvoke<{
+          observation?: { url?: string; pageState?: string; pageName?: string | null };
+          profile?: { id?: string; directory?: string };
+        }>("chrome.autoConnect", { directory: dir, profileId: dir, reuse: true });
+        if (!launched.ok) {
+          setToast(launched.error?.message ?? "Mở Chrome trước, login Facebook, rồi bấm lại.");
+          return;
+        }
+        obs = { ok: true, data: launched.data?.observation };
+      }
+      const bound = engine.applyChromeObservation(dir, obs.data);
+      if (!bound) {
+        setToast("Chưa thấy Facebook đã login trên cửa sổ hồ sơ này. Login tay rồi bấm «Tôi đã đăng nhập».");
+      }
+      refresh();
+    },
+    ingestChromeObservation: (
+      profileId: string | undefined,
+      obs: { url?: string; pageState?: string; pageName?: string | null } | null,
+    ) => {
+      if (engine.applyChromeObservation(profileId, obs)) refresh();
     },
     confirm: (taskId: string, found: boolean) => run(() => engine.confirmVerification(taskId, found)),
     clone: (id: string) => run(() => engine.cloneContent(id)),

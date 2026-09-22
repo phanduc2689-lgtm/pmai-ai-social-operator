@@ -1,3 +1,11 @@
+# PMAI 1.3.1 — 2026-09-22
+
+Session 2 đã login Facebook trên Chrome nhưng PMAI vẫn AUTH_REQUIRED.
+
+- Tự nhận Facebook đã login từ cửa sổ Chrome của **đúng session** (composer / feed / profile.php).
+- Nút **Tôi đã đăng nhập** trên card session khi chưa CONNECTED.
+- Thanh Chrome live đồng bộ identity mỗi 4 giây — không cần tạo session lại.
+
 # PMAI 1.3.0 — 2026-09-22
 
 Luồng đăng PROFILE / PAGE / GROUP **khóa** — không sửa locator.

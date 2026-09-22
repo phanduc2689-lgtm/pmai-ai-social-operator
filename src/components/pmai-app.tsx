@@ -1,4 +1,4 @@
-import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { BookOpen, FileText, LayoutDashboard, ListTodo, Settings, Shield, Users } from "lucide-react";
 import { FirstRun } from "@/components/pmai-first-run.tsx";
 import { PmaiLogo } from "@/components/pmai-logo.tsx";
@@ -30,9 +30,11 @@ function Light({ label, ok, text }: { label: string; ok: boolean; text: string }
   );
 }
 
-function ChromeLiveBar() {
+function ChromeLiveBar({ api }: { api: ReturnType<typeof usePmai> }) {
   const [line, setLine] = useState("Chrome: chưa gắn (preview web không điều khiển Chrome máy bạn)");
   const [ok, setOk] = useState(false);
+  const ingest = useRef(api.ingestChromeObservation);
+  ingest.current = api.ingestChromeObservation;
   useEffect(() => {
     if (!hasElectronHost()) return;
     let stop = false;
@@ -43,11 +45,24 @@ function ChromeLiveBar() {
         liveMode: string | null;
         liveCount?: number;
         locked: boolean;
+        sessions?: { profileId: string; live: boolean; liveMode?: string | null }[];
       }>("chrome.status");
       let extra = "";
-      if (st.ok && st.data?.live) {
-        const ob = await hostInvoke<{ url: string; pageState: string; pageName: string | null }>("chrome.observe");
-        if (ob.ok && ob.data) extra = ` · ${ob.data.pageState} · ${ob.data.url}`;
+      const liveSessions = (st.ok && st.data?.sessions ? st.data.sessions : []).filter((s) => s.live);
+      const targets = liveSessions.length
+        ? liveSessions
+        : st.ok && st.data?.live
+          ? [{ profileId: "", live: true as const }]
+          : [];
+      for (const sess of targets) {
+        const ob = await hostInvoke<{ url: string; pageState: string; pageName: string | null; profileId?: string }>(
+          "chrome.observe",
+          sess.profileId ? { profileId: sess.profileId, directory: sess.profileId } : undefined,
+        );
+        if (ob.ok && ob.data) {
+          extra = ` · ${ob.data.pageState} · ${ob.data.url}`;
+          ingest.current(ob.data.profileId || sess.profileId || undefined, ob.data);
+        }
       }
       if (stop) return;
       if (!st.ok) {
@@ -191,7 +206,7 @@ function PmaiShell() {
             />
           </div>
         </header>
-        <ChromeLiveBar />
+        <ChromeLiveBar api={api} />
 
         <div className="pmai-tabs">
           {NAV.map((item) => (

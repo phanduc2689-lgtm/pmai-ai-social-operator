@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { FakeBrowserAdapter, hasComposerSideEffect } from "./browser.ts";
-import { PmaiEngine, namesLooselyMatch, sanitizeComposerBody, urlsLooselyMatch } from "./engine.ts";
+import { PmaiEngine, isFacebookLoggedIn, namesLooselyMatch, sanitizeComposerBody, urlsLooselyMatch } from "./engine.ts";
 import { PmaiError } from "./errors.ts";
 import { contentRevisionHash } from "./hash.ts";
 import { looksLikeMediaId, resolveMediaSource, uploadPaths } from "./media.ts";
@@ -429,5 +429,33 @@ describe("workspace sessions", () => {
     const gotos = browser.calls.filter((c) => c.method === "goto");
     assert.ok(gotos.length >= 2);
     assert.equal(gotos.at(-1)?.args[0], page.url);
+  });
+
+  it("binds Facebook observation onto the matching chrome session", async () => {
+    const e = primed();
+    await e.createProfile({ name: "Hồ sơ 2", mode: "MANAGED_PROFILE", chromeDirectory: "pmai-1377d2fa" });
+    assert.equal(e.snapshot().identity?.sessionStatus, "AUTH_REQUIRED");
+    assert.equal(
+      isFacebookLoggedIn({ url: "https://www.facebook.com/profile.php?id=1", pageState: "composer" }),
+      true,
+    );
+    assert.equal(isFacebookLoggedIn({ url: "https://www.facebook.com/login", pageState: "login" }), false);
+    const ok = e.applyChromeObservation("pmai-1377d2fa", {
+      url: "https://www.facebook.com/profile.php?id=100057574357164",
+      pageState: "composer",
+      pageName: "Đạt Sói",
+    });
+    assert.equal(ok, true);
+    const snap = e.snapshot();
+    assert.equal(snap.identity?.sessionStatus, "CONNECTED");
+    assert.equal(snap.identity?.displayName, "Đạt Sói");
+    assert.equal(snap.sessions[0].identity?.sessionStatus, "CONNECTED");
+    assert.equal(
+      e.applyChromeObservation("pmai-1377d2fa", {
+        url: "https://www.facebook.com/login",
+        pageState: "login",
+      }),
+      false,
+    );
   });
 });
