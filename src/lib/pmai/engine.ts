@@ -1,5 +1,7 @@
 import { destType, assertDestinationUrl } from "./dest.ts";
 import { FakeBrowserAdapter, hasComposerSideEffect, type BrowserAdapter } from "./browser.ts";
+import { buildCommentTemplate, commentSystemPrompt, commentUserPrompt } from "./comment-gen.ts";
+import { classifyGroupPost } from "./group-intel.ts";
 import { PmaiError } from "./errors.ts";
 import { contentRevisionHash, newId, nowIso } from "./hash.ts";
 import { createLlmClient, extractClaims, type LlmClient } from "./llm.ts";
@@ -20,6 +22,8 @@ import type {
   ContactTemplate,
   ContentItem,
   FacebookIdentity,
+  GroupPostRecord,
+  GroupRpaSettings,
   MediaAsset,
   PageTarget,
   DestinationType,
@@ -121,6 +125,8 @@ export class PmaiEngine {
           scheduledAt: t.scheduledAt ?? null,
           claimedAt: t.claimedAt ?? null,
         })),
+        groupPosts: parsed.groupPosts ?? [],
+        groupRpa: { ...defaultGroupRpa(), ...parsed.groupRpa },
       };
       if (sessions.length) this.syncActiveFromSession();
     } catch {
@@ -656,6 +662,170 @@ export class PmaiEngine {
     );
   }
 
+  setGroupRpa(patch: Partial<GroupRpaSettings>) {
+    this.state.groupRpa = { ...this.state.groupRpa, ...patch };
+    this.persist();
+    return this.state.groupRpa;
+  }
+
+  ingestScrapedPosts(
+    pageTargetId: string,
+    raw: { author?: string; text: string; permalink?: string | null }[],
+  ): GroupPostRecord[] {
+    const page = this.findPage(pageTargetId);
+    if (!page) throw new PmaiError("NOT_READY", "Chưa có group đích.");
+    if (destType(page) !== "GROUP") {
+      throw new PmaiError("SCHEMA_INVALID", "Quét comment chỉ chạy trên đích loại Group.");
+    }
+    const cap = Math.max(1, this.state.groupRpa.maxPosts);
+    const incoming = raw.slice(0, cap);
+    const out: GroupPostRecord[] = [];
+    for (const row of incoming) {
+      const text = String(row.text || "").replace(/\s+/g, " ").trim();
+      if (text.length < 8) continue;
+      const author = String(row.author || "Ẩn danh").trim();
+      const permalink = row.permalink || null;
+      const fingerprint = (permalink || `${author}|${text}`).slice(0, 280);
+      const existing = this.state.groupPosts.find((p) => p.fingerprint === fingerprint && p.pageTargetId === pageTargetId);
+      if (existing) {
+        out.push(existing);
+        continue;
+      }
+      const intel = classifyGroupPost(text);
+      const rec: GroupPostRecord = {
+        id: newId("gp"),
+        pageTargetId,
+        fingerprint,
+        author,
+        text,
+        permalink,
+        bucket: intel.bucket,
+        skipReason: intel.skipReason,
+        intent: intel.intent,
+        destinations: intel.destinations,
+        services: intel.services,
+        score: intel.score,
+        reasons: intel.reasons,
+        commentDraft: intel.bucket === "POTENTIAL" ? buildCommentTemplate({ postText: text, intel, brand: this.state.brandFacts }) : "",
+        seenAt: nowIso(),
+      };
+      this.state.groupPosts.unshift(rec);
+      out.push(rec);
+    }
+    this.state.groupPosts = this.state.groupPosts.slice(0, 300);
+    this.log("group.scrape", "OK", `${out.length} bài · group ${page.name}`);
+    this.persist();
+    return out;
+  }
+
+  async generateGroupComment(postId: string): Promise<GroupPostRecord> {
+    const post = this.state.groupPosts.find((p) => p.id === postId);
+    if (!post) throw new PmaiError("NOT_READY", "Không thấy bài group.");
+    if (post.bucket !== "POTENTIAL") {
+      throw new PmaiError("POLICY_REJECTED", "Chỉ sinh comment cho bài tiềm năng.");
+    }
+    const intel = classifyGroupPost(post.text);
+    let body = buildCommentTemplate({
+      postText: post.text,
+      intel,
+      brand: this.state.brandFacts,
+      voiceNotes: this.state.voice.enabled ? this.state.voice.notes : "",
+    });
+    try {
+      const raw = await this.llm.completeJson<{ body: string }>({
+        purpose: "comment",
+        schemaName: "DraftResult",
+        system: commentSystemPrompt(),
+        user: commentUserPrompt({
+          postText: post.text,
+          intel,
+          brand: this.state.brandFacts,
+          voiceNotes: this.state.voice.enabled ? this.state.voice.notes : "",
+        }),
+      });
+      if (raw.body?.trim()) body = sanitizeComposerBody(raw.body);
+    } catch {
+      /* template fallback */
+    }
+    const footer = this.defaultFooter();
+    if (this.state.appendFooter && footer && !body.includes(footer)) {
+      body = `${body.trim()}\n${footer}`;
+    }
+    post.commentDraft = body.trim();
+    this.log("group.comment_draft", "OK", post.id);
+    this.persist();
+    return post;
+  }
+
+  updateGroupComment(postId: string, body: string) {
+    const post = this.state.groupPosts.find((p) => p.id === postId);
+    if (!post) throw new PmaiError("NOT_READY", "Không thấy bài group.");
+    post.commentDraft = sanitizeComposerBody(body);
+    this.persist();
+    return post;
+  }
+
+  commentsLastHour(pageTargetId: string): number {
+    const since = Date.now() - 60 * 60 * 1000;
+    return this.state.tasks.filter(
+      (t) =>
+        t.type === "COMMENT_GROUP_POST" &&
+        t.pageTargetId === pageTargetId &&
+        ["QUEUED", "RUNNING", "SUCCESS", "NEEDS_VERIFICATION"].includes(t.status) &&
+        new Date(t.createdAt).getTime() >= since,
+    ).length;
+  }
+
+  async submitGroupComment(postId: string) {
+    const post = this.state.groupPosts.find((p) => p.id === postId);
+    if (!post) throw new PmaiError("NOT_READY", "Không thấy bài group.");
+    if (post.bucket !== "POTENTIAL") throw new PmaiError("POLICY_REJECTED", "Bài thuộc nhóm bỏ qua.");
+    if (!post.commentDraft.trim()) throw new PmaiError("SCHEMA_INVALID", "Chưa có nội dung comment.");
+    const page = this.findPage(post.pageTargetId);
+    if (!page || page.status !== "VERIFIED") throw new PmaiError("NOT_READY", "Group chưa xác minh.");
+    const policy = evaluatePolicy("COMMENT_GROUP_POST");
+    if (policy.decision !== "WAIT_APPROVAL") throw new PmaiError("POLICY_REJECTED", "Policy từ chối comment.");
+    if (this.commentsLastHour(post.pageTargetId) >= this.state.groupRpa.maxCommentsPerHour) {
+      throw new PmaiError("IDLE_BLOCKED", `Đã đủ ${this.state.groupRpa.maxCommentsPerHour} comment/giờ trên group này.`);
+    }
+    const existing = this.state.contents.find((c) => c.brief === `comment:${post.id}` && c.status !== "ARCHIVED");
+    if (existing) {
+      const live = this.state.tasks.find(
+        (t) =>
+          t.contentId === existing.id &&
+          ["WAITING_APPROVAL", "QUEUED", "SCHEDULED", "RUNNING", "NEEDS_VERIFICATION"].includes(t.status),
+      );
+      if (live) throw new PmaiError("IDEMPOTENT_REJECT", "Comment bài này đang chờ hoặc chạy.");
+    }
+    const body = sanitizeComposerBody(post.commentDraft);
+    const revisionHash = await contentRevisionHash({
+      body,
+      mediaChecksums: [],
+      pageTargetId: post.pageTargetId,
+    });
+    const content: ContentItem = {
+      id: newId("cnt"),
+      pageTargetId: post.pageTargetId,
+      body,
+      brief: `comment:${post.id}`,
+      media: [],
+      status: "DRAFT",
+      revisionHash,
+      unverifiedClaims: extractClaims(body, {
+        hotline: this.state.brandFacts.hotline,
+        priceNote: this.state.brandFacts.priceNote,
+      }),
+      aiGenerated: true,
+      humanModified: false,
+    };
+    this.state.contents.unshift(content);
+    const { task, approval } = await this.submitForApproval(content.id);
+    task.type = "COMMENT_GROUP_POST";
+    this.log("group.comment_submit", "WAIT", `${post.id} → ${task.id}`, task.id);
+    this.persist();
+    return { post, content, task, approval };
+  }
+
   async submitForApproval(contentId: string, schedule?: SubmitSchedule) {
     const c = this.requireContent(contentId);
     const page = this.findPage(c.pageTargetId);
@@ -784,9 +954,85 @@ export class PmaiEngine {
     return a;
   }
 
+  private async executeCommentTask(taskId: string, browser?: BrowserAdapter) {
+    const t = this.state.tasks.find((x) => x.id === taskId);
+    if (!t) throw new PmaiError("NOT_READY", "Không có task.");
+    const a = this.state.approvals.find((x) => x.taskId === taskId);
+    const c = this.requireContent(t.contentId);
+    const owner = this.sessionOwningPage(t.pageTargetId);
+    const page = this.findPage(t.pageTargetId) ?? owner?.pages.find((p) => p.id === t.pageTargetId);
+    if (!a || !page) throw new PmaiError("NOT_READY", "Thiếu approval hoặc group đích.");
+    assertPublishAllowed({
+      approvalStatus: a.status,
+      pageTargetId: t.pageTargetId,
+      approvalPageTargetId: a.pageTargetId,
+      revisionHash: c.revisionHash,
+      approvalRevisionHash: a.contentRevisionHash,
+    });
+    const postId = c.brief.startsWith("comment:") ? c.brief.slice("comment:".length) : "";
+    const post = this.state.groupPosts.find((gp) => gp.id === postId);
+    if (!post) throw new PmaiError("NOT_READY", "Không khớp bài group đã duyệt.");
+    const sessionKey = `cmt:${owner?.id ?? t.pageTargetId}`;
+    if (this.runningSessionIds.has(sessionKey)) {
+      throw new PmaiError("IDLE_BLOCKED", "Account đang chạy một task.");
+    }
+    t.status = "RUNNING";
+    this.runningSessionIds.add(sessionKey);
+    this.log("comment.start", "RUNNING", post.id, t.id);
+    this.persist();
+    const adapter = browser ?? this.browserFactory();
+    this.lastBrowser = adapter;
+    try {
+      const identity = owner?.identity ?? this.state.identity;
+      const profile = owner?.profile ?? this.state.profile;
+      if (identity?.sessionStatus !== "CONNECTED") {
+        throw new PmaiError("AUTH_LOGOUT", "Phiên Facebook không CONNECTED.");
+      }
+      await adapter.launchProfile(profile?.chromeDirectory || profile?.id || "none");
+      const obs0 = await adapter.observe();
+      if (obs0.pageState === "captcha") throw new PmaiError("CAPTCHA_REQUIRED", "CAPTCHA — xử lý tay.");
+      if (obs0.pageState === "checkpoint") throw new PmaiError("CHECKPOINT", "Checkpoint — xử lý tay.");
+      if (obs0.pageState === "login") throw new PmaiError("AUTH_LOGOUT", "Đã đăng xuất.");
+      await this.pauseLikeHuman(adapter, "trước khi mở bài group", t.id);
+      await adapter.goto(post.permalink || page.url);
+      await this.pauseLikeHuman(adapter, "trước khi gõ comment", t.id);
+      if (typeof adapter.commentOnPost !== "function") {
+        throw new PmaiError("CAPABILITY_MISSING", "Adapter chưa hỗ trợ gõ comment.");
+      }
+      const typed = await adapter.commentOnPost({
+        snippet: post.text.slice(0, 80),
+        text: sanitizeComposerBody(c.body),
+        submit: this.state.groupRpa.autoSubmitComment,
+        permalink: post.permalink,
+      });
+      if (!typed?.typed) {
+        throw new PmaiError("UI_CHANGED", "Không gõ được ô bình luận.");
+      }
+      t.status = typed.submitted ? "SUCCESS" : "NEEDS_VERIFICATION";
+      t.errorCode = typed.submitted ? null : "NEEDS_VERIFICATION";
+      t.permalink = post.permalink;
+      a.status = "CONSUMED";
+      c.status = typed.submitted ? "PUBLISHED" : "IN_REVIEW";
+      this.log(typed.submitted ? "comment.submitted" : "comment.typed", t.status, post.id, t.id);
+      this.persist();
+      return t;
+    } catch (e) {
+      t.status = "FAILED";
+      t.errorCode = e instanceof PmaiError ? e.code : "UI_CHANGED";
+      this.log("comment.fail", "FAILED", e instanceof Error ? e.message : String(e), t.id);
+      this.persist();
+      throw e;
+    } finally {
+      this.runningSessionIds.delete(sessionKey);
+    }
+  }
+
   async executeTask(taskId: string, browser?: BrowserAdapter) {
     const t = this.state.tasks.find((x) => x.id === taskId);
     if (!t) throw new PmaiError("NOT_READY", "Không có task.");
+    if (t.type === "COMMENT_GROUP_POST") {
+      return this.executeCommentTask(taskId, browser);
+    }
     if (t.status === "CANCELLED" || t.status === "REJECTED") {
       throw new PmaiError("IDEMPOTENT_REJECT", "Task đã hủy — không đăng.");
     }
@@ -1282,7 +1528,18 @@ function emptyWorkspace(): WorkspaceState {
     tasks: [],
     approvals: [],
     activities: [],
+    groupPosts: [],
+    groupRpa: defaultGroupRpa(),
     firstRunStep: 1,
+  };
+}
+
+export function defaultGroupRpa(): GroupRpaSettings {
+  return {
+    maxScrollRounds: 8,
+    maxPosts: 30,
+    maxCommentsPerHour: 6,
+    autoSubmitComment: false,
   };
 }
 
