@@ -7,6 +7,11 @@ import { assertCompatibleMedia, detectMediaKind, uploadPaths } from "./media.ts"
 import { assertPublishAllowed, evaluatePolicy } from "./policy.ts";
 import { redact } from "./redact.ts";
 import { parseTaskDsl, type LlmProvider } from "./schema.ts";
+import {
+  assertFutureLocal,
+  resolveScheduledAt,
+  formatLocalDateTime,
+} from "./scheduler.ts";
 import type {
   Activity,
   Approval,
@@ -18,6 +23,7 @@ import type {
   MediaAsset,
   PageTarget,
   DestinationType,
+  SubmitSchedule,
   Task,
   VoiceProfile,
   WorkspaceSession,
@@ -108,6 +114,12 @@ export class PmaiEngine {
         pages: (parsed.pages ?? []).map((p) => ({
           ...p,
           type: destType(p),
+        })),
+        tasks: (parsed.tasks ?? []).map((t) => ({
+          ...t,
+          scheduleMode: t.scheduleMode === "SCHEDULED" ? "SCHEDULED" : (t.scheduleMode ?? "NOW"),
+          scheduledAt: t.scheduledAt ?? null,
+          claimedAt: t.claimedAt ?? null,
         })),
       };
       if (sessions.length) this.syncActiveFromSession();
@@ -574,11 +586,23 @@ export class PmaiEngine {
       hotline: this.state.brandFacts.hotline,
       priceNote: this.state.brandFacts.priceNote,
     });
-    const linked = this.state.approvals.filter((a) => a.contentId === contentId && a.status === "APPROVED");
+    const linked = this.state.approvals.filter((a) => a.contentId === contentId && (a.status === "APPROVED" || a.status === "PENDING"));
+    for (const a of linked) {
+      const running = this.state.tasks.find((x) => x.id === a.taskId && x.status === "RUNNING");
+      if (running) throw new PmaiError("NOT_READY", "Không sửa bài đang đăng.");
+    }
     for (const a of linked) {
       a.status = "STALE";
       const t = this.state.tasks.find((x) => x.id === a.taskId);
-      if (t && t.status === "WAITING_APPROVAL") t.status = "STALE_APPROVAL";
+      if (!t) continue;
+      if (
+        t.status === "WAITING_APPROVAL" ||
+        t.status === "SCHEDULED" ||
+        t.status === "QUEUED" ||
+        t.status === "MISSED"
+      ) {
+        t.status = "STALE_APPROVAL";
+      }
     }
     this.log("content.edit", "OK", contentId);
     this.persist();
@@ -632,7 +656,7 @@ export class PmaiEngine {
     );
   }
 
-  async submitForApproval(contentId: string) {
+  async submitForApproval(contentId: string, schedule?: SubmitSchedule) {
     const c = this.requireContent(contentId);
     const page = this.findPage(c.pageTargetId);
     if (!page || page.status !== "VERIFIED") {
@@ -643,9 +667,17 @@ export class PmaiEngine {
     const existing = this.state.tasks.find(
       (t) =>
         t.contentId === contentId &&
-        (t.status === "RUNNING" || t.status === "NEEDS_VERIFICATION" || t.status === "WAITING_APPROVAL"),
+        (t.status === "RUNNING" ||
+          t.status === "NEEDS_VERIFICATION" ||
+          t.status === "WAITING_APPROVAL" ||
+          t.status === "SCHEDULED" ||
+          t.status === "QUEUED"),
     );
     if (existing) throw new PmaiError("IDEMPOTENT_REJECT", "Task cùng nội dung đang chờ hoặc chạy.");
+
+    const mode = schedule?.mode === "SCHEDULED" ? "SCHEDULED" : "NOW";
+    const scheduledAt = mode === "SCHEDULED" ? resolveScheduledAt({ ...schedule, mode: "SCHEDULED" }) : null;
+    if (mode === "SCHEDULED" && scheduledAt) assertFutureLocal(scheduledAt);
 
     const dsl = parseTaskDsl({
       dslVersion: "2.1",
@@ -670,6 +702,9 @@ export class PmaiEngine {
       errorCode: null,
       permalink: null,
       createdAt: nowIso(),
+      scheduleMode: mode,
+      scheduledAt,
+      claimedAt: null,
     };
     const approval: Approval = {
       id: newId("apr"),
@@ -684,7 +719,12 @@ export class PmaiEngine {
     c.status = "IN_REVIEW";
     this.state.tasks.unshift(task);
     this.state.approvals.unshift(approval);
-    this.log("approval.request", "WAIT", task.id, task.id);
+    this.log(
+      "approval.request",
+      "WAIT",
+      mode === "SCHEDULED" ? `${task.id} · lịch ${formatLocalDateTime(scheduledAt)}` : task.id,
+      task.id,
+    );
     this.persist();
     return { task, approval };
   }
@@ -718,7 +758,26 @@ export class PmaiEngine {
     }
     a.status = "APPROVED";
     a.decidedAt = nowIso();
-    if (t) t.status = "QUEUED";
+    if (t) {
+      if (t.scheduleMode === "SCHEDULED" && t.scheduledAt) {
+        const when = new Date(t.scheduledAt).getTime();
+        if (!Number.isNaN(when) && when > Date.now()) {
+          t.status = "SCHEDULED";
+          this.log("schedule.armed", "SCHEDULED", formatLocalDateTime(t.scheduledAt), t.id);
+        } else {
+          t.status = "MISSED";
+          t.errorCode = "MISSED_SCHEDULE";
+          this.log(
+            "schedule.missed",
+            "MISSED",
+            `Lịch đăng đã quá giờ. Thời gian dự kiến: ${formatLocalDateTime(t.scheduledAt)}. Hiện tại: ${formatLocalDateTime(new Date())}`,
+            t.id,
+          );
+        }
+      } else {
+        t.status = "QUEUED";
+      }
+    }
     c.status = "APPROVED_SNAPSHOT";
     this.log("approval.approve", "APPROVED", a.id, a.taskId);
     this.persist();
@@ -728,6 +787,20 @@ export class PmaiEngine {
   async executeTask(taskId: string, browser?: BrowserAdapter) {
     const t = this.state.tasks.find((x) => x.id === taskId);
     if (!t) throw new PmaiError("NOT_READY", "Không có task.");
+    if (t.status === "CANCELLED" || t.status === "REJECTED") {
+      throw new PmaiError("IDEMPOTENT_REJECT", "Task đã hủy — không đăng.");
+    }
+    if (t.status === "MISSED") {
+      throw new PmaiError("NOT_READY", "Lịch đăng đã quá giờ. Chọn Đăng ngay hoặc Hủy.");
+    }
+    if (t.status === "SCHEDULED") {
+      const when = t.scheduledAt ? new Date(t.scheduledAt).getTime() : NaN;
+      if (Number.isNaN(when) || when > Date.now()) {
+        throw new PmaiError("NOT_READY", "Chưa đến giờ đăng.");
+      }
+      t.status = "QUEUED";
+      t.claimedAt = nowIso();
+    }
     const a = this.state.approvals.find((x) => x.taskId === taskId);
     const c = this.requireContent(t.contentId);
     const owner = this.sessionOwningPage(t.pageTargetId);
@@ -958,6 +1031,137 @@ export class PmaiEngine {
     this.log("content.clone", "OK", n.id);
     this.persist();
     return n;
+  }
+
+  /**
+   * On app start: overdue SCHEDULED tasks become MISSED (PMAI was closed).
+   * Future tasks stay SCHEDULED so the poller can fire at scheduledAt.
+   */
+  recoverSchedule(now?: Date): { armed: number; missed: number } {
+    const n = now ?? new Date();
+    let armed = 0;
+    let missed = 0;
+    for (const t of this.state.tasks) {
+      if (t.status !== "SCHEDULED") continue;
+      const when = t.scheduledAt ? new Date(t.scheduledAt).getTime() : NaN;
+      if (!Number.isNaN(when) && when < n.getTime()) {
+        t.status = "MISSED";
+        t.errorCode = "MISSED_SCHEDULE";
+        missed += 1;
+        this.log(
+          "schedule.missed",
+          "MISSED",
+          `Lịch đăng đã quá giờ. Thời gian dự kiến: ${formatLocalDateTime(t.scheduledAt)}. Hiện tại: ${formatLocalDateTime(n)}`,
+          t.id,
+        );
+      } else {
+        armed += 1;
+      }
+    }
+    this.log("scheduler.recover", "OK", `armed=${armed} missed=${missed}`);
+    this.persist();
+    return { armed, missed };
+  }
+
+  /**
+   * While PMAI is open: SCHEDULED with scheduledAt <= now → QUEUED.
+   * One claim per Chrome session per tick. Busy sessions stay SCHEDULED (not MISSED).
+   */
+  claimDueTasks(now?: Date): string[] {
+    const n = now ?? new Date();
+    const due = this.state.tasks
+      .filter((t) => t.status === "SCHEDULED" && t.scheduledAt && new Date(t.scheduledAt).getTime() <= n.getTime())
+      .sort((a, b) => new Date(a.scheduledAt ?? 0).getTime() - new Date(b.scheduledAt ?? 0).getTime());
+    if (!due.length) return [];
+
+    const busy = new Set<string>(this.runningSessionIds);
+    for (const t of this.state.tasks) {
+      if (t.status !== "RUNNING") continue;
+      const owner = this.sessionOwningPage(t.pageTargetId);
+      busy.add(owner?.id ?? t.pageTargetId);
+    }
+
+    const claimed: string[] = [];
+    for (const t of due) {
+      const owner = this.sessionOwningPage(t.pageTargetId);
+      const key = owner?.id ?? t.pageTargetId;
+      if (busy.has(key)) continue;
+      t.status = "QUEUED";
+      t.claimedAt = n.toISOString();
+      busy.add(key);
+      claimed.push(t.id);
+      this.log("schedule.due", "QUEUED", formatLocalDateTime(t.scheduledAt), t.id);
+    }
+    if (claimed.length) this.persist();
+    return claimed;
+  }
+
+  /** QUEUED scheduled tasks whose Chrome session is free — retry after IDLE_BLOCKED. */
+  readyScheduledQueueIds(): string[] {
+    const busy = new Set<string>(this.runningSessionIds);
+    for (const t of this.state.tasks) {
+      if (t.status !== "RUNNING") continue;
+      const owner = this.sessionOwningPage(t.pageTargetId);
+      busy.add(owner?.id ?? t.pageTargetId);
+    }
+    const ready: string[] = [];
+    const queued = this.state.tasks
+      .filter((t) => t.scheduleMode === "SCHEDULED" && t.status === "QUEUED")
+      .sort((a, b) => new Date(a.scheduledAt ?? 0).getTime() - new Date(b.scheduledAt ?? 0).getTime());
+    for (const t of queued) {
+      const owner = this.sessionOwningPage(t.pageTargetId);
+      const key = owner?.id ?? t.pageTargetId;
+      if (busy.has(key)) continue;
+      busy.add(key);
+      ready.push(t.id);
+    }
+    return ready;
+  }
+
+  reschedule(taskId: string, schedule: SubmitSchedule, now?: Date) {
+    const t = this.state.tasks.find((x) => x.id === taskId);
+    if (!t) throw new PmaiError("NOT_READY", "Không có task.");
+    if (t.status === "RUNNING") throw new PmaiError("NOT_READY", "Không đổi lịch bài đang đăng.");
+    if (t.status !== "SCHEDULED" && t.status !== "MISSED") {
+      throw new PmaiError("NOT_READY", "Chỉ đổi lịch bài đã lên lịch hoặc bị lỡ.");
+    }
+    const iso = resolveScheduledAt({ ...schedule, mode: "SCHEDULED" }, now);
+    if (!iso) throw new PmaiError("SCHEMA_INVALID", "Chọn ngày và giờ đăng.");
+    assertFutureLocal(iso, now);
+    t.scheduledAt = iso;
+    t.scheduleMode = "SCHEDULED";
+    t.status = "SCHEDULED";
+    t.errorCode = null;
+    t.claimedAt = null;
+    this.log("schedule.reschedule", "SCHEDULED", formatLocalDateTime(iso), t.id);
+    this.persist();
+    return t;
+  }
+
+  cancelScheduled(taskId: string) {
+    const t = this.state.tasks.find((x) => x.id === taskId);
+    if (!t) throw new PmaiError("NOT_READY", "Không có task.");
+    if (t.status === "RUNNING") throw new PmaiError("NOT_READY", "Không hủy bài đang đăng.");
+    if (t.status !== "SCHEDULED" && t.status !== "MISSED" && t.status !== "QUEUED") {
+      throw new PmaiError("NOT_READY", "Không hủy được task này.");
+    }
+    t.status = "CANCELLED";
+    this.log("schedule.cancel", "CANCELLED", "User cancelled scheduled post.", t.id);
+    this.persist();
+    return t;
+  }
+
+  /** Operator chose Đăng ngay on a MISSED task. Approval remains APPROVED. */
+  publishMissedNow(taskId: string) {
+    const t = this.state.tasks.find((x) => x.id === taskId);
+    if (!t) throw new PmaiError("NOT_READY", "Không có task.");
+    if (t.status !== "MISSED") throw new PmaiError("NOT_READY", "Chỉ đăng ngay bài bị lỡ lịch.");
+    t.status = "QUEUED";
+    t.errorCode = null;
+    t.claimedAt = nowIso();
+    this.log("schedule.publish_now", "QUEUED", "Đăng ngay sau khi lỡ lịch", t.id);
+    this.persist();
+    return t;
   }
 
   private requireContent(id: string): ContentItem {

@@ -1,6 +1,6 @@
 # PMAI — AI Social Operator
 
-**v1.2.0** — đăng Facebook lên **trang cá nhân / fanpage / group** (soạn → duyệt → Chrome thực thi).
+**v2.1.0** — soạn bài Facebook → **duyệt tay** → đăng ngay **hoặc lên lịch** lên **trang cá nhân / fanpage / group**.
 
 Desktop app: soạn bài Facebook bằng AI, **bạn duyệt**, rồi **Chrome trên máy bạn** mới đăng.
 
@@ -8,10 +8,13 @@ Desktop app: soạn bài Facebook bằng AI, **bạn duyệt**, rồi **Chrome t
 - Không copy cookie / token giữa hồ sơ
 - Tự quét Chrome User Data, **chọn sẵn và kết nối hồ sơ đã login Facebook**
 - Composer Facebook không mở trước khi bạn bấm Duyệt
+- **Lên lịch** theo giờ máy đang chạy. PMAI phải đang mở lúc tới giờ; mở lại sau giờ hẹn thì bài **BỎ LỠ** (không tự đăng)
 
 Repo: https://github.com/phanduc2689-lgtm/pmai-ai-social-operator
 
 **Tải bản mới nhất:** [Releases](https://github.com/phanduc2689-lgtm/pmai-ai-social-operator/releases)
+
+Baseline đối chiếu luồng đăng (locator freeze): tag **v2.0**.
 
 ## Cài trên Windows (cách đang dùng)
 

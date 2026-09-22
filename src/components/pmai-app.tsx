@@ -178,7 +178,7 @@ function PmaiShell() {
           })}
         </nav>
         <p style={{ padding: "12px 16px", fontSize: 11, color: "var(--color-subtle)" }}>
-          v1.3 · {snap.sessions.length || 1} session · local
+          v2.1 · {snap.sessions.length || 1} session · local
         </p>
       </aside>
 
@@ -226,11 +226,25 @@ function PmaiShell() {
           {firstRun && nav === "home" ? (
             <FirstRun api={api} />
           ) : nav === "home" ? (
-            <Dashboard api={api} onCompose={() => setNav("compose")} onApprove={() => setNav("approve")} />
+            <Dashboard
+              api={api}
+              onCompose={() => setNav("compose")}
+              onApprove={() => setNav("approve")}
+              onOpenDraft={(id) => {
+                setDraftId(id);
+                setNav("compose");
+              }}
+            />
           ) : nav === "compose" ? (
             <Compose api={api} draftId={draftId} setDraftId={setDraftId} />
           ) : nav === "approve" ? (
-            <Approve api={api} />
+            <Approve
+              api={api}
+              onOpenDraft={(id) => {
+                setDraftId(id);
+                setNav("compose");
+              }}
+            />
           ) : nav === "accounts" ? (
             <Accounts api={api} />
           ) : nav === "logs" ? (

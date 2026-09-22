@@ -23,13 +23,17 @@ export type TaskStatus =
   | "VALIDATING"
   | "WAITING_APPROVAL"
   | "QUEUED"
+  | "SCHEDULED"
   | "RUNNING"
   | "SUCCESS"
   | "NEEDS_VERIFICATION"
   | "FAILED"
   | "REJECTED"
   | "CANCELLED"
-  | "STALE_APPROVAL";
+  | "STALE_APPROVAL"
+  | "MISSED";
+
+export type ScheduleMode = "NOW" | "SCHEDULED";
 
 export type ApprovalStatus =
   | "PENDING"
@@ -126,6 +130,12 @@ export interface Task {
   errorCode: string | null;
   permalink: string | null;
   createdAt: string;
+  /** NOW = publish after approve. SCHEDULED = wait until scheduledAt (local clock). */
+  scheduleMode?: ScheduleMode;
+  /** Instant stored as ISO. Interpreted from the machine's local timezone at compose time. */
+  scheduledAt?: string | null;
+  /** Set when the scheduler claims a due task so it cannot be claimed twice. */
+  claimedAt?: string | null;
 }
 
 export interface Activity {
@@ -198,4 +208,14 @@ export interface WorkspaceState {
   approvals: Approval[];
   activities: Activity[];
   firstRunStep: 1 | 2 | 3 | 4;
+}
+
+export interface SubmitSchedule {
+  mode?: ScheduleMode;
+  /** ISO instant. Preferred when the caller already converted local date+time. */
+  scheduledAt?: string;
+  /** Local calendar date YYYY-MM-DD from the date picker. */
+  date?: string;
+  /** Local clock HH:MM from the time picker. */
+  time?: string;
 }

@@ -6,5 +6,6 @@ export * from "./hash.ts";
 export * from "./llm.ts";
 export * from "./policy.ts";
 export * from "./redact.ts";
+export * from "./scheduler.ts";
 export * from "./schema.ts";
 export * from "./types.ts";

@@ -1,7 +1,7 @@
 {
   "name": "pmai-ai-social-operator",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "sideEffects": false,
   "type": "module",
   "main": "apps/desktop/dist-main/main.cjs",
@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite --config apps/desktop/vite.config.ts --host 127.0.0.1 --port 5174",
     "start": "node apps/desktop/run-dev.mjs",
-    "test": "node --experimental-strip-types --test src/lib/pmai/engine.test.ts src/lib/pmai/chrome-profiles.test.ts apps/desktop/facebook-publish.test.cjs apps/desktop/media-upload.test.cjs apps/desktop/playwright-adapter.test.cjs",
+    "test": "node --experimental-strip-types --test src/lib/pmai/engine.test.ts src/lib/pmai/scheduler.test.ts src/lib/pmai/chrome-profiles.test.ts apps/desktop/facebook-publish.test.cjs apps/desktop/media-upload.test.cjs apps/desktop/playwright-adapter.test.cjs",
     "typecheck": "tsc --noEmit",
     "electron:dev": "node apps/desktop/run-dev.mjs"
   },

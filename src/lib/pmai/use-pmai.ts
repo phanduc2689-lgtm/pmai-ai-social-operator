@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FakeBrowserAdapter } from "./browser.ts";
 import { isFacebookLoggedIn } from "./engine.ts";
 import { isPmaiError } from "./errors.ts";
@@ -7,7 +7,8 @@ import { getEngine } from "./host.ts";
 import { hasElectronHost, hostInvoke } from "./ipc.ts";
 import { looksLikeMediaId, resolveMediaSource } from "./media.ts";
 import { rememberPreview } from "./media-preview.ts";
-import type { ContactTemplate, DestinationType, MediaAsset, VoiceProfile } from "./types.ts";
+import { SchedulerService } from "./scheduler.ts";
+import type { ContactTemplate, DestinationType, MediaAsset, SubmitSchedule, VoiceProfile } from "./types.ts";
 
 export type LocalFileMeta = {
   name: string;
@@ -68,6 +69,40 @@ export function usePmai() {
     },
     [engine, refresh],
   );
+
+  const executeTaskWithAdapter = useCallback(
+    (taskId: string) => {
+      const session = engine.sessionOwningTask(taskId);
+      const dir = session?.profile?.chromeDirectory || session?.profile?.id || engine.snapshot().profile?.chromeDirectory;
+      const browser = hasElectronHost() ? new HostBrowserAdapter(dir) : undefined;
+      return engine.executeTask(taskId, browser);
+    },
+    [engine],
+  );
+
+  useEffect(() => {
+    engine.recoverSchedule();
+    refresh();
+    const inflight = new Set<string>();
+    const svc = new SchedulerService(engine);
+    svc.start((ids) => {
+      void (async () => {
+        for (const id of ids) {
+          if (inflight.has(id)) continue;
+          inflight.add(id);
+          try {
+            await executeTaskWithAdapter(id);
+          } catch {
+            /* logged on the task */
+          } finally {
+            inflight.delete(id);
+            refresh();
+          }
+        }
+      })();
+    });
+    return () => svc.stop();
+  }, [engine, executeTaskWithAdapter, refresh]);
 
   const gate = useMemo(() => engine.canCreatePost(), [snap, engine]);
   const lights = useMemo(() => engine.lights(), [snap, engine]);
@@ -207,15 +242,9 @@ export function usePmai() {
         }),
       );
     },
-    submit: (id: string) => run(() => engine.submitForApproval(id)),
+    submit: (id: string, schedule?: SubmitSchedule) => run(() => engine.submitForApproval(id, schedule)),
     decide: (id: string, d: "APPROVE" | "REJECT" | "CANCEL") => run(() => engine.decideApproval(id, d)),
-    execute: (taskId: string) =>
-      run(() => {
-        const session = engine.sessionOwningTask(taskId);
-        const dir = session?.profile?.chromeDirectory || session?.profile?.id || engine.snapshot().profile?.chromeDirectory;
-        const browser = hasElectronHost() ? new HostBrowserAdapter(dir) : undefined;
-        return engine.executeTask(taskId, browser);
-      }),
+    execute: (taskId: string) => run(() => executeTaskWithAdapter(taskId)),
     executeEnabled: () =>
       run(() =>
         engine.executeEnabledSessions((sessionId) => {
@@ -302,6 +331,13 @@ export function usePmai() {
     },
     confirm: (taskId: string, found: boolean) => run(() => engine.confirmVerification(taskId, found)),
     clone: (id: string) => run(() => engine.cloneContent(id)),
+    reschedule: (taskId: string, schedule: SubmitSchedule) => run(() => engine.reschedule(taskId, schedule)),
+    cancelScheduled: (taskId: string) => run(() => engine.cancelScheduled(taskId)),
+    publishMissedNow: async (taskId: string) => {
+      const queued = await run(() => engine.publishMissedNow(taskId));
+      if (!queued) return undefined;
+      return run(() => executeTaskWithAdapter(taskId));
+    },
     setLlm: (p: "openai" | "gemini" | "anthropic" | "xai" | "mock", model: string, key: string | null) =>
       run(() => engine.setLlm(p, model, key)),
     testLlm: () => run(() => engine.testLlm()),

@@ -37,6 +37,9 @@
   --radius-md: 12px;
   --radius-lg: 18px;
   --radius-xl: 28px;
+
+  --shadow-panel: 0 1px 0 color-mix(in oklab, #1c1b19 8%, transparent),
+    0 12px 32px -18px color-mix(in oklab, #1c1b19 28%, transparent);
 }
 
 @layer base {

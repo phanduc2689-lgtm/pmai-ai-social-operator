@@ -1,3 +1,14 @@
+# PMAI 2.1.0 — 2026-09-22
+
+Đăng theo lịch + hàng đợi. Locator PROFILE / PAGE / GROUP **không đổi** (baseline v2.0 giữ nguyên).
+
+- Soạn: **Đăng ngay** hoặc **Lên lịch** (ngày + giờ của máy đang chạy — không cứng UTC / Việt Nam / `Asia/Ho_Chi_Minh`).
+- Giờ hẹn phải ở tương lai. PMAI phải **đang mở** lúc tới giờ — không phải dịch vụ Windows.
+- Mở lại **trước** giờ hẹn: vẫn ĐÃ LÊN LỊCH. Mở lại **sau** giờ hẹn: **BỎ LỠ** — không tự đăng. Có [Đăng ngay] [Hủy].
+- Hàng đợi trên Tổng quan và Duyệt: sắp xếp giờ sớm trước, đếm ngược `Còn HH:MM:SS`. Menu: Xem bài / Chỉnh sửa / Đổi lịch / Hủy lịch. Không sửa khi đang đăng.
+- Vẫn phải duyệt tay trước khi vào hàng đợi. Một Chrome profile = một task đang chạy.
+- Dùng lại engine đăng v2.0 (`executeTask` / HostBrowserAdapter). Không đụng `facebook-publish` / `media-upload`.
+
 # PMAI 2.0.0 — 2026-09-22
 
 **Baseline đối chiếu.** Bản này đã làm đúng yêu cầu — khóa để so sánh các commit sau.
