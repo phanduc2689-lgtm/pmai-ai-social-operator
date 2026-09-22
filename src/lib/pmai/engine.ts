@@ -274,7 +274,30 @@ export class PmaiEngine {
     await new Promise((r) => setTimeout(r, ms));
   }
 
-  private async returnHome(adapter: BrowserAdapter, url: string, taskId: string) {
+  private hasNextQueuedStep(task: Task): boolean {
+    const owner = this.sessionOwningPage(task.pageTargetId);
+    const pageIds = new Set((owner?.pages.length ? owner.pages : []).map((pg) => pg.id));
+    if (!pageIds.size) pageIds.add(task.pageTargetId);
+    return this.state.tasks.some(
+      (x) => x.id !== task.id && x.status === "QUEUED" && pageIds.has(x.pageTargetId),
+    );
+  }
+
+  /** Facebook home only after SUCCESS is written to nhật ký, and only if this session has no next queued task. */
+  private async returnHomeAfterSuccess(adapter: BrowserAdapter, url: string, taskId: string) {
+    const t = this.state.tasks.find((x) => x.id === taskId);
+    if (!t || t.status !== "SUCCESS") return;
+    if (this.hasNextQueuedStep(t)) {
+      this.log("publish.stage", "OK", "SKIP_RETURN_HOME còn bước tiếp theo", taskId);
+      return;
+    }
+    if (!(adapter.kind === "fake" || adapter instanceof FakeBrowserAdapter)) {
+      const ms = this.forcedHumanPauseMs != null ? Math.max(0, this.forcedHumanPauseMs) : 30_000;
+      if (ms) {
+        this.log("publish.stage", "OK", `HUMAN_PAUSE ${Math.round(ms / 1000)}s · sau SUCCESS, trước về trang chủ`, taskId);
+        await new Promise((r) => setTimeout(r, ms));
+      }
+    }
     this.log("publish.stage", "OK", "RETURN_HOME", taskId);
     try {
       await adapter.goto(url);
@@ -750,8 +773,6 @@ export class PmaiEngine {
     const adapter = browser ?? this.browserFactory();
     this.lastBrowser = adapter;
     const requirePath = adapter.kind !== "fake";
-    let openedDest = false;
-
     try {
       const identity = owner?.identity ?? this.state.identity;
       const profile = owner?.profile ?? this.state.profile;
@@ -768,7 +789,6 @@ export class PmaiEngine {
       this.log("publish.stage", "RUNNING", `DESTINATION_OPEN ${destType(page)}`, t.id);
       await this.pauseLikeHuman(adapter, "trước khi mở đích", t.id);
       await adapter.goto(page.url);
-      openedDest = true;
       await this.pauseLikeHuman(adapter, "sau khi mở đích", t.id);
       const obs1 = await adapter.observe();
       if (obs1.pageState === "login") throw new PmaiError("AUTH_LOGOUT", "Đã đăng xuất.");
@@ -849,6 +869,7 @@ export class PmaiEngine {
       c.status = "PUBLISHED";
       this.log("task.success", "SUCCESS", permalink, t.id);
       this.persist();
+      await this.returnHomeAfterSuccess(adapter, page.url, t.id);
       return t;
     } catch (e) {
       if (e instanceof PmaiError && e.code === "NEEDS_VERIFICATION") {
@@ -870,9 +891,6 @@ export class PmaiEngine {
       throw e;
     } finally {
       this.runningSessionIds.delete(sessionKey);
-      if (openedDest) {
-        await this.returnHome(adapter, page.url, t.id);
-      }
     }
   }
 

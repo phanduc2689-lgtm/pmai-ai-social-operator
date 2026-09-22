@@ -1,3 +1,12 @@
+# PMAI 1.3.2 — 2026-09-22
+
+Return Facebook **sai bước**: không nhảy về trang chủ lúc đang đăng.
+
+- Chỉ về trang chủ **sau khi nhật ký ghi SUCCESS**.
+- Chờ **30 giây** rồi mới goto trang chủ đích.
+- Còn task/bước tiếp theo trên cùng session → **không** về trang chủ.
+- FAILED / NEEDS_VERIFICATION không nhảy về trang chủ.
+
 # PMAI 1.3.1 — 2026-09-22
 
 Session 2 đã login Facebook trên Chrome nhưng PMAI vẫn AUTH_REQUIRED.

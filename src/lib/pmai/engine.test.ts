@@ -431,6 +431,52 @@ describe("workspace sessions", () => {
     assert.equal(gotos.at(-1)?.args[0], page.url);
   });
 
+  it("does not return home on NEEDS_VERIFICATION — only after SUCCESS log", async () => {
+    const e = await readyEngine();
+    const page = e.snapshot().pages[0];
+    const draft = await e.createDraft("Tour");
+    const { task, approval } = await e.submitForApproval(draft.id);
+    e.decideApproval(approval.id, "APPROVE");
+    const browser = new FakeBrowserAdapter({
+      pageName: page.name,
+      pageUrl: page.url,
+      crashAfterClickPublish: true,
+    });
+    const done = await e.executeTask(task.id, browser);
+    assert.equal(done.status, "NEEDS_VERIFICATION");
+    assert.equal(
+      e.snapshot().activities.some((a) => a.detail === "RETURN_HOME"),
+      false,
+    );
+    const gotos = browser.calls.filter((c) => c.method === "goto");
+    assert.equal(gotos.length, 1);
+  });
+
+  it("skips return home while another queued task remains, then goes home after last SUCCESS", async () => {
+    const e = primed();
+    await e.createProfile({ name: "A", mode: "MANAGED_PROFILE" });
+    e.markLoggedIn("A", { seedDemo: false });
+    const page = e.addDestination({ type: "PAGE", name: "Page A", url: "https://www.facebook.com/pagea" });
+    e.selectPage(page.id);
+    const d1 = await e.createDraft("one");
+    const s1 = await e.submitForApproval(d1.id);
+    e.decideApproval(s1.approval.id, "APPROVE");
+    const d2 = await e.createDraft("two");
+    const s2 = await e.submitForApproval(d2.id);
+    e.decideApproval(s2.approval.id, "APPROVE");
+    const browser = new FakeBrowserAdapter({ pageName: page.name, pageUrl: page.url });
+    await e.executeQueuedForSession(e.snapshot().sessions[0].id, browser);
+    assert.equal(e.snapshot().tasks.filter((x) => x.status === "SUCCESS").length, 2);
+    assert.equal(
+      e.snapshot().activities.filter((a) => a.detail === "SKIP_RETURN_HOME còn bước tiếp theo").length,
+      1,
+    );
+    assert.equal(e.snapshot().activities.filter((a) => a.detail === "RETURN_HOME").length, 1);
+    const gotos = browser.calls.filter((c) => c.method === "goto");
+    assert.equal(gotos.length, 3);
+    assert.equal(gotos.at(-1)?.args[0], page.url);
+  });
+
   it("binds Facebook observation onto the matching chrome session", async () => {
     const e = primed();
     await e.createProfile({ name: "Hồ sơ 2", mode: "MANAGED_PROFILE", chromeDirectory: "pmai-1377d2fa" });
