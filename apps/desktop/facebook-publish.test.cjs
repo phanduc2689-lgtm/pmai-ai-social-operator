@@ -207,4 +207,53 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
       assert.equal(await page.evaluate(() => window.__cta), "publish");
     });
   });
+
+  it("PAGE video: Tạo bài viết → Tiếp → Chỉnh sửa thước phim → Tiếp → Cài đặt thước phim → Đăng", async () => {
+    await withChromium(async (browser) => {
+      const { publishFromComposer } = require("./facebook-publish.cjs");
+      const page = await browser.newPage();
+      await page.setContent(`<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"></head>
+<body>
+  <div id="composer" role="dialog" aria-modal="true">
+    <h2>Tạo bài viết</h2>
+    <p>Khám phá cùng PMAI.</p>
+    <video width="240" height="140"></video>
+    <div id="next1" role="button" tabindex="0">Tiếp</div>
+  </div>
+  <script>
+    window.__steps = [];
+    function show(html) { document.body.innerHTML = html; bind(); }
+    function bind() {
+      const n1 = document.getElementById("next1");
+      if (n1) n1.addEventListener("click", () => {
+        window.__steps.push("composer-next");
+        show(\`<div id="reel" role="dialog" aria-modal="true">
+          <h2>Chỉnh sửa thước phim</h2>
+          <div id="next2" role="button" tabindex="0">Tiếp</div>
+        </div>\`);
+      });
+      const n2 = document.getElementById("next2");
+      if (n2) n2.addEventListener("click", () => {
+        window.__steps.push("reel-next");
+        show(\`<div id="settings" role="dialog" aria-modal="true">
+          <h2>Cài đặt thước phim</h2>
+          <div id="save" role="button" tabindex="0">Lưu</div>
+          <div id="publish" role="button" tabindex="0">Đăng</div>
+        </div>\`);
+      });
+      const pub = document.getElementById("publish");
+      if (pub) pub.addEventListener("click", () => {
+        window.__steps.push("publish");
+        document.getElementById("settings").remove();
+      });
+    }
+    bind();
+  </script>
+</body></html>`);
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE" });
+      assert.equal(result.ok, true);
+      assert.deepEqual(await page.evaluate(() => window.__steps), ["composer-next", "reel-next", "publish"]);
+    });
+  });
 });

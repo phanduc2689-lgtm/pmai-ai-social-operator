@@ -106,20 +106,30 @@ async function safeClick(loc) {
 }
 
 async function resolveDialog(page) {
+  const settings = dialogRoot(page).filter({
+    hasText: /cài đặt bài viết|post settings|cài đặt thước phim|reel settings/i,
+  });
+  const reelEdit = dialogRoot(page).filter({ hasText: /chỉnh sửa thước phim|edit reel|chỉnh sửa video/i });
   const composer = dialogRoot(page).filter({ hasText: /tạo bài viết|create post|create a post/i });
-  const settings = dialogRoot(page).filter({ hasText: /cài đặt bài viết|post settings/i });
   if (await visible(settings.last(), 400)) return settings.last();
+  if (await visible(reelEdit.last(), 400)) return reelEdit.last();
   if (await visible(composer.last(), 400)) return composer.last();
   if (await visible(dialogRoot(page).last(), 400)) return dialogRoot(page).last();
   return dialogRoot(page).last();
 }
 
 async function detectStage(page) {
+  if (await visible(page.getByText("Cài đặt thước phim", { exact: true }).first(), 400)) return "REEL_SETTINGS";
+  if (await visible(page.getByText("Reel settings", { exact: true }).first(), 300)) return "REEL_SETTINGS";
   if (await visible(page.getByText("Cài đặt bài viết", { exact: true }).first(), 500)) return "POST_SETTINGS";
   if (await visible(page.getByText("Post settings", { exact: true }).first(), 400)) return "POST_SETTINGS";
+  if (await visible(page.getByText("Chỉnh sửa thước phim", { exact: true }).first(), 400)) return "REEL_EDITOR";
+  if (await visible(page.getByText("Edit reel", { exact: true }).first(), 300)) return "REEL_EDITOR";
   if (await visible(page.getByText("Tạo bài viết", { exact: true }).first(), 500)) return "COMPOSER_EDITING";
   const dlg = await resolveDialog(page);
+  if (await visible(dlg.getByText(/cài đặt thước phim|reel settings/i).first(), 250)) return "REEL_SETTINGS";
   if (await visible(dlg.getByText(/cài đặt bài viết|post settings/i).first(), 300)) return "POST_SETTINGS";
+  if (await visible(dlg.getByText(/chỉnh sửa thước phim|edit reel/i).first(), 250)) return "REEL_EDITOR";
   if (await visible(dlg.getByText(/tạo bài viết|create post/i).first(), 300)) return "COMPOSER_EDITING";
   if (await visible(dlg, 300)) return "COMPOSER_EDITING";
   return "UNKNOWN";
@@ -135,13 +145,15 @@ async function waitMediaPreview(page, timeout = 8000) {
   return false;
 }
 
-async function waitStage(page, want, timeout = 20000) {
+async function waitAnyStage(page, wants, timeout = 20000) {
   const start = Date.now();
+  const set = new Set(wants);
   while (Date.now() - start < timeout) {
-    if ((await detectStage(page)) === want) return true;
+    const s = await detectStage(page);
+    if (set.has(s)) return s;
     await sleep(250);
   }
-  return false;
+  return null;
 }
 
 function framesOf(page) {
@@ -239,7 +251,13 @@ function inPageClickFooterPublish() {
 
   const headingHit = [...document.querySelectorAll("h1,h2,h3,h4,[role='heading'],span,div")].find((el) => {
     const t = norm(el.innerText || el.textContent);
-    return t === "Cài đặt bài viết" || t === "Post settings" || t === "Post Settings";
+    return (
+      t === "Cài đặt bài viết" ||
+      t === "Post settings" ||
+      t === "Post Settings" ||
+      t === "Cài đặt thước phim" ||
+      t === "Reel settings"
+    );
   });
 
   let scope = document.body;
@@ -341,14 +359,20 @@ async function clickPublishEvaluate(page) {
 async function clickFooterPublishLocators(page) {
   const settingsModal = page
     .locator('[role="dialog"], [aria-modal="true"], [role="sheet"]')
-    .filter({ hasText: /cài đặt bài viết|post settings/i })
+    .filter({ hasText: /cài đặt bài viết|post settings|cài đặt thước phim|reel settings/i })
     .last();
 
   const divLayer = page
     .locator("div")
-    .filter({ has: page.getByText("Cài đặt bài viết", { exact: true }) })
-    .filter({ has: page.getByText("Lưu", { exact: true }) })
-    .filter({ has: page.getByText(/^Đăng$/) });
+    .filter({
+      has: page
+        .getByText("Cài đặt bài viết", { exact: true })
+        .or(page.getByText("Cài đặt thước phim", { exact: true }))
+        .or(page.getByText("Post settings", { exact: true }))
+        .or(page.getByText("Reel settings", { exact: true })),
+    })
+    .filter({ has: page.getByText("Lưu", { exact: true }).or(page.getByText("Save", { exact: true })) })
+    .filter({ has: page.getByText(/^Đăng$/).or(page.getByText(/^Post$/)) });
 
   const layer = (await visible(settingsModal, 250)) ? settingsModal : divLayer.last();
 
@@ -373,20 +397,23 @@ async function clickFooterPublishLocators(page) {
 }
 
 async function clickComposerNext(page) {
-  const composer = page
-    .locator('[role="dialog"], [aria-modal="true"], [role="sheet"]')
-    .filter({ hasText: /tạo bài viết|create post|create a post/i })
-    .last();
-  const byHeading = page.locator("div").filter({ has: page.getByText("Tạo bài viết", { exact: true }) });
-  const layer = (await visible(composer, 600)) ? composer : byHeading.last();
-  const nextBtn = layer
-    .getByRole("button", { name: /^Tiếp$|^Next$/ })
-    .or(layer.locator('[role="button"]').filter({ hasText: /^Tiếp$|^Next$/ }))
-    .or(layer.getByText(/^Tiếp$/, { exact: true }))
-    .or(layer.getByText(/^Next$/, { exact: true }));
-  if (await visible(nextBtn.last(), 2500)) {
-    await safeClick(nextBtn.last());
-    return true;
+  const layers = [
+    page.locator('[role="dialog"], [aria-modal="true"], [role="sheet"]').filter({ hasText: /chỉnh sửa thước phim|edit reel|chỉnh sửa video/i }).last(),
+    page.locator('[role="dialog"], [aria-modal="true"], [role="sheet"]').filter({ hasText: /tạo bài viết|create post|create a post/i }).last(),
+    page.locator("div").filter({ has: page.getByText("Chỉnh sửa thước phim", { exact: true }) }).last(),
+    page.locator("div").filter({ has: page.getByText("Tạo bài viết", { exact: true }) }).last(),
+  ];
+  for (const layer of layers) {
+    if (!(await visible(layer, 350))) continue;
+    const nextBtn = layer
+      .getByRole("button", { name: /^Tiếp$|^Next$/ })
+      .or(layer.locator('[role="button"]').filter({ hasText: /^Tiếp$|^Next$/ }))
+      .or(layer.getByText(/^Tiếp$/, { exact: true }))
+      .or(layer.getByText(/^Next$/, { exact: true }));
+    if (await visible(nextBtn.last(), 800)) {
+      await safeClick(nextBtn.last());
+      return true;
+    }
   }
   return clickExactLabel(page, ["Tiếp", "Next"]);
 }
@@ -413,7 +440,10 @@ async function dialogHidden(page, timeout = 30000) {
   const heading = page
     .getByText("Cài đặt bài viết", { exact: true })
     .or(page.getByText("Tạo bài viết", { exact: true }))
-    .or(page.getByText("Post settings", { exact: true }));
+    .or(page.getByText("Post settings", { exact: true }))
+    .or(page.getByText("Cài đặt thước phim", { exact: true }))
+    .or(page.getByText("Chỉnh sửa thước phim", { exact: true }))
+    .or(page.getByText("Reel settings", { exact: true }));
   try {
     await heading.first().waitFor({ state: "hidden", timeout });
     return true;
@@ -431,6 +461,8 @@ async function verifyPublished(page) {
     if (await visible(t, 2500)) return true;
   }
   if (await visible(page.getByText("Cài đặt bài viết", { exact: true }).first(), 400)) return false;
+  if (await visible(page.getByText("Cài đặt thước phim", { exact: true }).first(), 300)) return false;
+  if (await visible(page.getByText("Chỉnh sửa thước phim", { exact: true }).first(), 300)) return false;
   if (await visible(page.getByText("Tạo bài viết", { exact: true }).first(), 400)) return false;
   return true;
 }
@@ -529,13 +561,25 @@ async function publishPageComposer(page, opts = {}) {
   let stage = await detectStage(page);
   mark("COMPOSER_STAGE", true, stage);
 
-  if (stage !== "POST_SETTINGS") {
+  if (stage !== "POST_SETTINGS" && stage !== "REEL_SETTINGS") {
     const nextOk = await clickComposerNext(page);
     if (!nextOk) throw fail("UI_CHANGED", "Không thấy nút Tiếp trên modal Tạo bài viết.");
     mark("NEXT_CLICKED");
-    const moved = await waitStage(page, "POST_SETTINGS", 20000);
-    if (!moved) throw fail("UI_CHANGED", "Đã bấm Tiếp nhưng chưa thấy modal Cài đặt bài viết.");
-    mark("POST_SETTINGS_OPEN");
+    const after = await waitAnyStage(page, ["POST_SETTINGS", "REEL_EDITOR", "REEL_SETTINGS"], 20000);
+    if (!after) {
+      throw fail("UI_CHANGED", "Đã bấm Tiếp nhưng chưa thấy Cài đặt bài viết / Chỉnh sửa thước phim.");
+    }
+    if (after === "REEL_EDITOR") {
+      mark("REEL_EDITOR_OPEN");
+      const reelNext = await clickComposerNext(page);
+      if (!reelNext) throw fail("UI_CHANGED", "Không thấy nút Tiếp trên Chỉnh sửa thước phim.");
+      mark("REEL_NEXT_CLICKED");
+      const settings = await waitAnyStage(page, ["REEL_SETTINGS", "POST_SETTINGS"], 20000);
+      if (!settings) throw fail("UI_CHANGED", "Đã bấm Tiếp trên thước phim nhưng chưa thấy Cài đặt thước phim.");
+      mark("POST_SETTINGS_OPEN", true, settings);
+    } else {
+      mark("POST_SETTINGS_OPEN", true, after);
+    }
   } else {
     mark("POST_SETTINGS_OPEN", true, "đã mở sẵn");
   }

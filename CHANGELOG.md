@@ -1,3 +1,13 @@
+# PMAI 1.2.7 — 2026-09-22
+
+Chỉ **Fanpage + video + caption**. Profile / Group / Fanpage ảnh+chữ giữ nguyên.
+
+Sau «Tiếp» Facebook mở **Chỉnh sửa thước phim** (không phải Cài đặt bài viết):
+
+1. Tạo bài viết → Tiếp
+2. Chỉnh sửa thước phim → Tiếp
+3. Cài đặt thước phim → Đăng (cặp Lưu + Đăng)
+
 # PMAI 1.2.6 — 2026-09-22
 
 - **Khóa** luồng đăng Trang cá nhân và Group (chữ / ảnh / video) — không sửa thêm.
