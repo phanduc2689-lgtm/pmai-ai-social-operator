@@ -46,6 +46,33 @@ export type ApprovalStatus =
 
 export type DestinationType = "PROFILE" | "PAGE" | "GROUP";
 
+export type GroupPostBucket = "SKIP" | "POTENTIAL" | "UNKNOWN";
+
+export interface GroupPostRecord {
+  id: string;
+  pageTargetId: string;
+  fingerprint: string;
+  author: string;
+  text: string;
+  permalink: string | null;
+  bucket: GroupPostBucket;
+  skipReason: string | null;
+  intent: string | null;
+  destinations: string[];
+  services: string[];
+  score: number;
+  reasons: string[];
+  commentDraft: string;
+  seenAt: string;
+}
+
+export interface GroupRpaSettings {
+  maxScrollRounds: number;
+  maxPosts: number;
+  maxCommentsPerHour: number;
+  autoSubmitComment: boolean;
+}
+
 export type ConnectionMode = "ATTACH_EXISTING" | "MANAGED_PROFILE";
 
 export type MediaKind = "image" | "video";
@@ -123,7 +150,7 @@ export interface Approval {
 
 export interface Task {
   id: string;
-  type: "SAVE_LOCAL_DRAFT" | "PUBLISH_CONTENT";
+  type: "SAVE_LOCAL_DRAFT" | "PUBLISH_CONTENT" | "COMMENT_GROUP_POST";
   contentId: string;
   pageTargetId: string;
   status: TaskStatus;
@@ -207,6 +234,8 @@ export interface WorkspaceState {
   tasks: Task[];
   approvals: Approval[];
   activities: Activity[];
+  groupPosts: GroupPostRecord[];
+  groupRpa: GroupRpaSettings;
   firstRunStep: 1 | 2 | 3 | 4;
 }
 

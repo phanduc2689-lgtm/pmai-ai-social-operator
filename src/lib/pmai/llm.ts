@@ -2,7 +2,7 @@ import { PmaiError } from "./errors.ts";
 import type { LlmProvider } from "./schema.ts";
 
 export interface LlmCompleteInput {
-  purpose: "plan" | "content" | "classify_page" | "quality";
+  purpose: "plan" | "content" | "classify_page" | "quality" | "comment";
   schemaName: string;
   system: string;
   user: string;
@@ -44,6 +44,10 @@ export class MockLlmClient implements LlmClient {
     return { ok: true, model: this.model };
   }
   async completeJson<T>(input: LlmCompleteInput): Promise<T> {
+    if (input.purpose === "comment") {
+      const body = `Bạn hỏi lịch đi khá rõ. Nên chốt 1–2 điểm chính cho đỡ mệt.\nNếu cần lịch cụ thể, inbox page giúp bạn lọc giúp.`;
+      return { body, unverifiedClaims: extractClaims(body, { hotline: "", priceNote: "" }) } as T;
+    }
     if (input.purpose === "content") {
       const brief = input.user;
       const body = `Khám phá cùng PMAI.\n\n${brief.trim()}\n\nLiên hệ fanpage để đặt chỗ.`;

@@ -65,6 +65,14 @@ export class HostBrowserAdapter implements BrowserAdapter {
     this.calls.push({ method: "screenshot", args: [] });
     return this.call<string>("chrome.screenshot", this.payload());
   }
+  async scrapeGroup(input: { url: string; maxScrolls?: number; maxPosts?: number }) {
+    this.calls.push({ method: "scrapeGroup", args: [input] });
+    return this.call<{ author?: string; text: string; permalink?: string | null }[]>("chrome.scrapeGroup", this.payload(input));
+  }
+  async commentOnPost(input: { snippet: string; text: string; submit: boolean; permalink?: string | null }) {
+    this.calls.push({ method: "commentOnPost", args: [input] });
+    return this.call<{ ok: boolean; typed: boolean; submitted: boolean }>("chrome.commentPost", this.payload(input));
+  }
   async close() {
     this.calls.push({ method: "close", args: [] });
     await this.call("chrome.close", this.payload());
