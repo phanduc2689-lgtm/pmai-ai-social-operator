@@ -256,4 +256,42 @@ describe("composer fixture — footer Đăng, not Đăng ngay", () => {
       assert.deepEqual(await page.evaluate(() => window.__steps), ["composer-next", "reel-next", "publish"]);
     });
   });
+
+  it("PAGE: dismisses Chat trực tiếp popup with Lúc khác, never Thêm nút, then Đăng", async () => {
+    await withChromium(async (browser) => {
+      const { publishFromComposer } = require("./facebook-publish.cjs");
+      const page = await browser.newPage();
+      await page.setContent(`<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"></head>
+<body>
+  <div id="settings" role="dialog" aria-modal="true">
+    <h2>Cài đặt thước phim</h2>
+    <div id="save" role="button" tabindex="0">Lưu</div>
+    <div id="publish" role="button" tabindex="0">Đăng</div>
+  </div>
+  <div id="cta" role="dialog" aria-modal="true" style="position:fixed;inset:20% 20%;background:#fff;z-index:9">
+    <h2>Chat trực tiếp với khách hàng</h2>
+    <p>Bạn có thể thêm nút "Gửi tin nhắn" vào bài viết.</p>
+    <div id="later" role="button" tabindex="0">Lúc khác</div>
+    <div id="add" role="button" tabindex="0">Thêm nút</div>
+  </div>
+  <script>
+    window.__cta = null;
+    document.getElementById("add").addEventListener("click", () => { window.__cta = "add"; });
+    document.getElementById("later").addEventListener("click", () => {
+      window.__cta = "later";
+      document.getElementById("cta").remove();
+    });
+    document.getElementById("publish").addEventListener("click", () => {
+      if (document.getElementById("cta")) { window.__cta = "publish-blocked"; return; }
+      window.__cta = "publish";
+      document.getElementById("settings").remove();
+    });
+  </script>
+</body></html>`);
+      const result = await publishFromComposer(page, { hasMedia: false, destinationType: "PAGE" });
+      assert.equal(result.ok, true);
+      assert.equal(await page.evaluate(() => window.__cta), "publish");
+    });
+  });
 });

@@ -1,3 +1,9 @@
+# PMAI 1.2.8 — 2026-09-22
+
+Chỉ **Fanpage**. Profile / Group không đổi.
+
+Popup «Chat trực tiếp với khách hàng» (Thêm nút / Lúc khác) có thể hiện khi đăng ảnh hoặc video. PMAI kiểm tra; nếu có thì bấm **Lúc khác**, không bấm Thêm nút, rồi Đăng.
+
 # PMAI 1.2.7 — 2026-09-22
 
 Chỉ **Fanpage + video + caption**. Profile / Group / Fanpage ảnh+chữ giữ nguyên.

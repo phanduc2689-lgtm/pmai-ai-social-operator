@@ -436,6 +436,47 @@ async function clickExactPublish(page) {
   return false;
 }
 
+async function hasPageMessengerCtaPopup(page) {
+  if (await visible(page.getByText("Chat trực tiếp với khách hàng", { exact: true }).first(), 280)) return true;
+  const later = page.getByText("Lúc khác", { exact: true });
+  const add = page.getByText("Thêm nút", { exact: true });
+  if ((await visible(later.first(), 200)) && (await visible(add.first(), 200))) return true;
+  if (await visible(page.getByText(/add a ["“]?send message["”]? button/i).first(), 200)) return true;
+  return false;
+}
+
+/** Fanpage-only: dismiss «Chat trực tiếp với khách hàng» via exact «Lúc khác». Never «Thêm nút». */
+async function dismissPageComposerPrompts(page, timeout = 2500) {
+  const start = Date.now();
+  let dismissed = false;
+  while (Date.now() - start < timeout) {
+    if (!(await hasPageMessengerCtaPopup(page))) {
+      if (dismissed || Date.now() - start > 400) return dismissed;
+      await sleep(150);
+      continue;
+    }
+    const pop = page
+      .locator('[role="dialog"], [aria-modal="true"], [role="alertdialog"], [role="sheet"]')
+      .filter({ hasText: /chat trực tiếp với khách hàng|gửi tin nhắn|thêm nút|send message/i })
+      .last();
+    const byTitle = page.locator("div").filter({ has: page.getByText("Chat trực tiếp với khách hàng", { exact: true }) }).last();
+    const layer = (await visible(pop, 200)) ? pop : (await visible(byTitle, 200) ? byTitle : page);
+    const later = layer
+      .getByRole("button", { name: /^Lúc khác$|^Later$|^Not now$|^Maybe later$/ })
+      .or(layer.locator('[role="button"]').filter({ hasText: /^Lúc khác$|^Later$|^Not now$/ }))
+      .or(layer.getByText("Lúc khác", { exact: true }))
+      .or(layer.getByText("Later", { exact: true }));
+    if (await visible(later.last(), 500)) {
+      await safeClick(later.last());
+      dismissed = true;
+      await sleep(250);
+      continue;
+    }
+    await sleep(180);
+  }
+  return dismissed;
+}
+
 async function dialogHidden(page, timeout = 30000) {
   const heading = page
     .getByText("Cài đặt bài viết", { exact: true })
@@ -584,9 +625,16 @@ async function publishPageComposer(page, opts = {}) {
     mark("POST_SETTINGS_OPEN", true, "đã mở sẵn");
   }
 
+  const skippedCta = await dismissPageComposerPrompts(page, 3500);
+  if (skippedCta) mark("PAGE_CTA_DISMISSED", true, "Lúc khác");
+
   mark("PUBLISH_READY");
 
-  const found = await clickExactPublish(page);
+  let found = await clickExactPublish(page);
+  if (!found) {
+    await dismissPageComposerPrompts(page, 2000);
+    found = await clickExactPublish(page);
+  }
   if (!found) {
     throw fail(
       "UI_CHANGED",
@@ -600,6 +648,7 @@ async function publishPageComposer(page, opts = {}) {
   mark("PUBLISH_PROCESSING", hidden, hidden ? "modal đóng" : "modal còn mở");
 
   if (!hidden) {
+    await dismissPageComposerPrompts(page, 2000);
     const again = await clickExactPublish(page);
     if (again) {
       mark("PUBLISH_CLICKED", true, "click lần 2");
@@ -618,6 +667,8 @@ module.exports = {
   publishDirectComposer,
   publishPageComposer,
   clickDirectPublish,
+  dismissPageComposerPrompts,
+  hasPageMessengerCtaPopup,
   normalizeLabel,
   isExactPublishName,
   isExactNextName,
