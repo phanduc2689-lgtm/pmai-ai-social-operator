@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const TaskTypeSchema = z.enum(["SAVE_LOCAL_DRAFT", "PUBLISH_CONTENT"]);
+export const TaskTypeSchema = z.enum(["SAVE_LOCAL_DRAFT", "PUBLISH_CONTENT", "COMMENT_GROUP_POST"]);
 export type TaskType = z.infer<typeof TaskTypeSchema>;
 
 export const TaskDslSchema = z.object({

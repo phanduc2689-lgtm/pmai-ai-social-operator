@@ -6,6 +6,7 @@ export type PolicyDecision = "ALLOW" | "WAIT_APPROVAL" | "DENY";
 const RULES: Record<TaskType, { decision: PolicyDecision; requireApproval: boolean }> = {
   SAVE_LOCAL_DRAFT: { decision: "ALLOW", requireApproval: false },
   PUBLISH_CONTENT: { decision: "WAIT_APPROVAL", requireApproval: true },
+  COMMENT_GROUP_POST: { decision: "WAIT_APPROVAL", requireApproval: true },
 };
 
 export function evaluatePolicy(type: string): {
@@ -15,7 +16,7 @@ export function evaluatePolicy(type: string): {
   if (/mass_|bypass_|spoof_|evade_/i.test(type)) {
     return { decision: "DENY", requireApproval: true };
   }
-  if (type === "SAVE_LOCAL_DRAFT" || type === "PUBLISH_CONTENT") {
+  if (type === "SAVE_LOCAL_DRAFT" || type === "PUBLISH_CONTENT" || type === "COMMENT_GROUP_POST") {
     return RULES[type];
   }
   return { decision: "DENY", requireApproval: true };
