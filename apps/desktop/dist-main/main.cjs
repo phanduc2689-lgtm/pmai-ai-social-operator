@@ -43,6 +43,9 @@ const ALLOWLIST = [
   "chrome.publish",
   "chrome.screenshot",
   "chrome.close",
+  "chrome.replyScan",
+  "chrome.replyOne",
+  "chrome.replyLike",
   "workspace.get",
   "profile.create",
   "session.markLoggedIn",
@@ -422,6 +425,9 @@ function registerIpc() {
   );
   handleOnce("chrome.screenshot", wrap(async (payload) => adapter().screenshotPng(pickDirectory(payload))));
   handleOnce("chrome.close", wrap(async (payload) => adapter().closeBrowser(pickDirectory(payload))));
+  handleOnce("chrome.replyScan", wrap(async (payload) => adapter().scanPostComments(payload || {})));
+  handleOnce("chrome.replyOne", wrap(async (payload) => adapter().replyOnComment(payload || {})));
+  handleOnce("chrome.replyLike", wrap(async (payload) => adapter().likePostComments(payload || {})));
   for (const ch of ALLOWLIST) {
     handleOnce(ch, async () => ({
       ok: false,
