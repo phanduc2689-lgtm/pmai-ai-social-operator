@@ -540,6 +540,24 @@ async function closeBrowser(profileId) {
   lastId = null;
 }
 
+async function scanPostComments(payload = {}) {
+  const reply = require("./facebook-reply.cjs");
+  const live = requireLive();
+  return reply.scanPost(live.page, payload || {});
+}
+
+async function replyOnComment(payload = {}) {
+  const reply = require("./facebook-reply.cjs");
+  const live = requireLive();
+  return reply.replyToComment(live.page, payload || {});
+}
+
+async function likePostComments(payload = {}) {
+  const reply = require("./facebook-reply.cjs");
+  const live = requireLive();
+  return reply.likeComments(live.page, payload || {});
+}
+
 module.exports = {
   listProfiles,
   status,
@@ -555,6 +573,9 @@ module.exports = {
   publishPost,
   screenshotPng,
   closeBrowser,
+  scanPostComments,
+  replyOnComment,
+  likePostComments,
   isCdpUp,
   isComposerCue,
   sessionCount,
