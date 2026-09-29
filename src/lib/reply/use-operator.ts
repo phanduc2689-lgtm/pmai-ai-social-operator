@@ -25,6 +25,7 @@ import {
   savePersisted,
   type PersistedReply,
 } from "./storage.ts";
+import { hasElectronHost, hostInvoke } from "../pmai/ipc.ts";
 
 export type NavId = "home" | "reply" | "logs" | "settings";
 export type RunKind = "reply" | "like" | null;
@@ -38,6 +39,37 @@ export type Phase =
   | { type: "liking"; commentId: string };
 
 const initial = defaultPersisted();
+
+interface LiveRow {
+  id: string;
+  author: string;
+  body: string;
+  liked: boolean;
+  role: "author" | "customer";
+  timeLabel: string;
+  initials: string;
+  tone: 0 | 1 | 2 | 3 | 4 | 5;
+}
+
+function asThread(row: LiveRow): ThreadComment {
+  const tone = row.tone >= 0 && row.tone <= 5 ? row.tone : 0;
+  return {
+    id: row.id,
+    author: row.author,
+    initials: row.initials || "FB",
+    tone,
+    timeLabel: row.timeLabel || "",
+    body: row.body,
+    role: row.role === "author" ? "author" : "customer",
+    liked: Boolean(row.liked),
+    reply: null,
+    replyAt: null,
+  };
+}
+
+function isSampleThread(rows: ThreadComment[]) {
+  return rows.some((row) => row.id === "c-author" || /^c\d+$/.test(row.id));
+}
 
 function newLog(partial: Omit<LogEntry, "id" | "at">): LogEntry {
   return {
@@ -69,6 +101,9 @@ export function useOperator() {
   const [running, setRunning] = useState<RunKind>(null);
   const [paused, setPaused] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [liveMode, setLiveMode] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
 
   const commentsRef = useRef(comments);
   const linesRef = useRef<string[]>(replyLines(replyDraft));
@@ -81,6 +116,8 @@ export function useOperator() {
 
   const ctrl = useRef({ runId: 0, paused: false, waiters: [] as Array<() => void> });
   const busyRef = useRef(false);
+  const scannedUrl = useRef("");
+  const scanLock = useRef(false);
 
   useEffect(() => {
     const saved = loadPersisted();
@@ -133,10 +170,81 @@ export function useOperator() {
     setSelectionState((prev) => normalizeSelection(typeof update === "function" ? update(prev) : update));
   }
 
-  function likeOne(id: string) {
+  async function scanLive(force = false) {
+    if (!hasElectronHost()) {
+      setLiveMode(false);
+      return;
+    }
+    const url = postUrl.trim();
+    if (!parsePostUrl(url).ok) {
+      setScanError("Dán URL bài viết Facebook trước.");
+      return;
+    }
+    if (!force && scannedUrl.current === url && !isSampleThread(commentsRef.current)) return;
+    if (scanLock.current) return;
+    scanLock.current = true;
+    setLiveMode(true);
+    setScanning(true);
+    setScanError("");
+    if (isSampleThread(commentsRef.current)) {
+      setComments([]);
+      commentsRef.current = [];
+    }
+    const pageName = destination?.name || identity?.name || "";
+    try {
+      const res = await hostInvoke<{ comments: LiveRow[]; pageUrl: string }>("chrome.replyScan", { url, pageName });
+      setScanning(false);
+      if (!res.ok || !res.data) {
+        const message = res.error?.message ?? "Không đọc được comment trên Chrome.";
+        setScanError(message);
+        pushLog({ action: "Quét comment", target: "Chrome", detail: message, result: "FAIL" });
+        return;
+      }
+      scannedUrl.current = url;
+      const next = res.data.comments.map(asThread);
+      setComments(next);
+      commentsRef.current = next;
+      const customers = next.filter((row) => row.role === "customer").length;
+      pushLog({
+        action: "Quét comment",
+        target: "Chrome",
+        detail: `${customers} comment khách · bài thật`,
+        result: "OK",
+      });
+    } finally {
+      scanLock.current = false;
+      setScanning(false);
+    }
+  }
+
+  useEffect(() => {
+    if (step !== 3 || !hasElectronHost()) return;
+    if (!parsePostUrl(postUrl).ok) return;
+    void scanLive(false);
+  }, [step, postUrl]);
+
+  async function likeOne(id: string) {
     if (busyRef.current) return;
     const row = commentsRef.current.find((comment) => comment.id === id);
     if (!row || row.liked) return;
+    if (hasElectronHost()) {
+      const res = await hostInvoke<{ results: { id: string; ok: boolean }[] }>("chrome.replyLike", {
+        url: postUrl.trim(),
+        targets: [{ id: row.id, author: row.author, body: row.body }],
+      });
+      if (!res.ok || !res.data?.results.some((item) => item.ok)) {
+        pushLog({
+          action: "Like",
+          target: row.author,
+          detail: res.error?.message ?? "Không thấy nút Thích trên Chrome",
+          result: "FAIL",
+        });
+        return;
+      }
+      setComments((prev) => prev.map((comment) => (comment.id === id ? { ...comment, liked: true } : comment)));
+      pushLog({ action: "Like", target: row.author, detail: "Chrome", result: "OK" });
+      return;
+    }
     setComments((prev) => prev.map((comment) => (comment.id === id ? { ...comment, liked: true } : comment)));
     pushLog({ action: "Like", target: row.author, detail: "Like lẻ", result: "OK" });
   }
@@ -200,7 +308,106 @@ export function useOperator() {
     pushLog({ action: "Tiếp tục", target: "Hàng đợi", detail: "Chạy tiếp từ chỗ đã dừng", result: "OK" });
   }
 
+  async function runLiveReplies(ids: string[]) {
+    const pool = linesRef.current;
+    if (busyRef.current || pool.length === 0 || !urlState.ok) return;
+    const runId = bumpRun();
+    busyRef.current = true;
+    setRunning("reply");
+    setLiveMode(true);
+    const pageName = destination?.name || identity?.name || "";
+    pushLog({ action: "Mở bài", target: "Chrome", detail: postUrl.trim(), result: "OK" });
+    let lastLine: string | null = null;
+    let failures = 0;
+    try {
+      for (let index = 0; index < ids.length; index += 1) {
+        await gate(runId);
+        const id = ids[index];
+        const comment = commentsRef.current.find((row) => row.id === id);
+        if (!comment || comment.role !== "customer" || comment.reply) {
+          pushLog({
+            action: "Bỏ qua",
+            target: comment?.author ?? id,
+            detail: "Đã có reply hoặc là bài của page",
+            result: "SKIP",
+          });
+          continue;
+        }
+        const text = pickReply(linesRef.current, lastLine);
+        lastLine = text;
+        const via: "arrow" | "enter" = index % 3 === 2 ? "enter" : "arrow";
+        setActiveId(id);
+        setPhase({ type: "typing", commentId: id, draft: "", full: text, progress: 0.08 });
+        pushLog({ action: "Bấm Trả lời", target: comment.author, detail: "Chrome CDP", result: "OK" });
+        const timer = window.setInterval(() => {
+          setPhase((prev) => {
+            if (prev.type !== "typing" || prev.commentId !== id) return prev;
+            const progress = Math.min(0.9, prev.progress + 0.06);
+            const count = Math.max(1, Math.floor(text.length * progress));
+            return { ...prev, progress, draft: text.slice(0, count) };
+          });
+        }, 180);
+        const res = await hostInvoke<{ via: "arrow" | "enter"; typedMs: number; liked: boolean }>("chrome.replyOne", {
+          url: postUrl.trim(),
+          author: comment.author,
+          body: comment.body,
+          text,
+          via,
+          likeAfter: likeRef.current && !comment.liked,
+          pageName,
+        });
+        window.clearInterval(timer);
+        if (ctrl.current.runId !== runId) {
+          pushLog({ action: "Dừng", target: comment.author, detail: "Comment đang gõ vẫn gửi trên Chrome", result: "SKIP" });
+          break;
+        }
+        if (!res.ok || !res.data) {
+          failures += 1;
+          const message = res.error?.message ?? "Không gửi được";
+          pushLog({ action: "Lỗi Chrome", target: comment.author, detail: message, result: "FAIL" });
+          if (failures >= 3 || /checkpoint|captcha/i.test(message)) break;
+          continue;
+        }
+        failures = 0;
+        const used = res.data.via;
+        const replyAt = new Date().toISOString();
+        const likedNow = Boolean(res.data.liked);
+        commentsRef.current = commentsRef.current.map((row) =>
+          row.id === id ? { ...row, reply: text, replyAt, liked: row.liked || likedNow } : row,
+        );
+        setComments(commentsRef.current);
+        setPhase({ type: "sending", commentId: id, via: used, draft: text });
+        pushLog({
+          action: used === "arrow" ? "Gửi mũi tên" : "Gửi Enter",
+          target: comment.author,
+          detail: `${(res.data.typedMs / 1000).toFixed(1)} giây trên Chrome · ${text}`,
+          result: "OK",
+        });
+        if (res.data.liked) {
+          pushLog({ action: "Like", target: comment.author, detail: "Kèm sau reply", result: "OK" });
+        }
+        await sleep(200, runId);
+      }
+      if (ctrl.current.runId === runId) {
+        pushLog({ action: "Xong hàng đợi", target: "Chrome", detail: `${ids.length} comment`, result: "OK" });
+        setPhase({ type: "idle" });
+        setActiveId(null);
+      }
+    } catch (error) {
+      if (!(error instanceof QueueAbort)) throw error;
+    } finally {
+      if (ctrl.current.runId === runId) {
+        setRunning(null);
+        busyRef.current = false;
+      }
+    }
+  }
+
   async function runReplies(ids: string[]) {
+    if (hasElectronHost()) {
+      await runLiveReplies(ids);
+      return;
+    }
     const pool = linesRef.current;
     if (busyRef.current || pool.length === 0 || !urlState.ok || !destinationReady) return;
     const runId = bumpRun();
@@ -305,7 +512,47 @@ export function useOperator() {
     }
   }
 
+  async function likeLive() {
+    if (busyRef.current) return;
+    const targets = commentsRef.current.filter((row) => row.role === "customer" && !row.liked);
+    if (targets.length === 0) return;
+    const runId = bumpRun();
+    busyRef.current = true;
+    setRunning("like");
+    pushLog({ action: "Like hàng loạt", target: "Chrome", detail: `${targets.length} comment`, result: "OK" });
+    try {
+      const res = await hostInvoke<{ results: { id: string; ok: boolean; detail: string }[] }>("chrome.replyLike", {
+        url: postUrl.trim(),
+        targets: targets.map((row) => ({ id: row.id, author: row.author, body: row.body })),
+      });
+      if (ctrl.current.runId !== runId) return;
+      if (!res.ok || !res.data) {
+        pushLog({ action: "Lỗi Chrome", target: "Like", detail: res.error?.message ?? "Không like được", result: "FAIL" });
+      } else {
+        const okIds = new Set(res.data.results.filter((row) => row.ok).map((row) => row.id));
+        setComments((prev) => prev.map((row) => (okIds.has(row.id) ? { ...row, liked: true } : row)));
+        pushLog({
+          action: "Xong hàng đợi",
+          target: "Like",
+          detail: `${okIds.size}/${targets.length} trên Chrome`,
+          result: "OK",
+        });
+      }
+      setPhase({ type: "idle" });
+      setActiveId(null);
+    } finally {
+      if (ctrl.current.runId === runId) {
+        setRunning(null);
+        busyRef.current = false;
+      }
+    }
+  }
+
   async function likeAll() {
+    if (hasElectronHost()) {
+      await likeLive();
+      return;
+    }
     if (busyRef.current) return;
     const runId = bumpRun();
     busyRef.current = true;
@@ -348,6 +595,11 @@ export function useOperator() {
 
   function resetThread() {
     if (running || paused) stop(true);
+    if (hasElectronHost()) {
+      scannedUrl.current = "";
+      void scanLive(true);
+      return;
+    }
     setComments(freshThread());
     commentsRef.current = freshThread();
     pushLog({ action: "Đặt lại bài", target: "Bài mẫu", detail: "Xóa reply và like trên khung xem trước", result: "OK" });
@@ -391,6 +643,10 @@ export function useOperator() {
     running,
     paused,
     activeId,
+    liveMode,
+    scanning,
+    scanError,
+    scanLive,
     urlState,
     readyDestinations,
     hiddenDestinations,
