@@ -15,6 +15,7 @@ interface FbStageProps {
   likingId: string | null;
   replyArmedId: string | null;
   busy: boolean;
+  live?: boolean;
   onReply: (id: string) => void;
   onLike: (id: string) => void;
 }
@@ -32,6 +33,7 @@ export function FbStage({
   likingId,
   replyArmedId,
   busy,
+  live = false,
   onReply,
   onLike,
 }: FbStageProps) {
@@ -68,7 +70,7 @@ export function FbStage({
           <i />
         </span>
         <p className="stage-url">{hostPath}</p>
-        <span className="stage-badge">CDP mẫu</span>
+        <span className={live ? "stage-badge is-live" : "stage-badge"}>{live ? "Chrome CDP" : "CDP mẫu"}</span>
       </div>
       <div className="fb" ref={scrollerRef}>
         <header className="fb-top">

@@ -64,7 +64,7 @@ export function OperatorApp() {
             );
           })}
         </nav>
-        <p className="aside-foot">v2.2 · phản hồi bình luận · local</p>
+        <p className="aside-foot">v2.2.1 · phản hồi bình luận · local</p>
       </aside>
       <div className="col">
         <header className="header">
@@ -428,8 +428,13 @@ function StepQueue({ op }: { op: Operator }) {
           <span style={{ transform: `scaleX(${op.phase.type === "typing" || op.phase.type === "sending" ? typingProgress : queueProgress})` }} />
         </div>
         <p className="muted">
-          {done}/{op.customers.length} đã gửi. Gõ 3–5 giây như người thật, rồi gửi bằng mũi tên xanh hoặc Enter.
+          {op.scanning
+            ? "Đang đọc comment trên Chrome đã gắn."
+            : op.liveMode
+              ? `${done}/${op.customers.length} đã gửi trên bài thật. Gõ 3–5 giây trong ô Trả lời, rồi mũi tên xanh hoặc Enter.`
+              : `${done}/${op.customers.length} đã gửi trên khung mẫu. Chưa đụng Facebook.`}
         </p>
+        {op.scanError ? <p className="warn-text">{op.scanError}</p> : null}
         <label className="check">
           <input
             type="checkbox"
@@ -454,10 +459,10 @@ function StepQueue({ op }: { op: Operator }) {
             <button
               type="button"
               className="btn"
-              disabled={op.pending.length === 0 || op.lines.length === 0}
+              disabled={op.scanning || op.pending.length === 0 || op.lines.length === 0}
               onClick={() => void op.runReplies(op.pending.map((row) => row.id))}
             >
-              Chạy hàng đợi
+              {op.scanning ? "Đang đọc comment…" : "Chạy hàng đợi"}
             </button>
           ) : null}
           {op.running || op.paused ? (
@@ -474,6 +479,9 @@ function StepQueue({ op }: { op: Operator }) {
               Like hàng loạt
             </button>
           )}
+          <button type="button" className="btn-ghost" onClick={() => void op.scanLive(true)} disabled={Boolean(op.running) || op.scanning}>
+            Tải comment trên Chrome
+          </button>
           <button type="button" className="btn-ghost" onClick={op.resetThread} disabled={Boolean(op.running)}>
             Đặt lại bài
           </button>
@@ -514,6 +522,7 @@ function StepQueue({ op }: { op: Operator }) {
         likingId={likingId}
         replyArmedId={replyArmedId}
         busy={Boolean(op.running)}
+        live={op.liveMode}
         onReply={(id) => void op.runReplies([id])}
         onLike={(id) => op.likeOne(id)}
       />
@@ -566,7 +575,7 @@ function LogTable({ rows }: { rows: Operator["logs"] }) {
 }
 
 function SettingsScreen({ op }: { op: Operator }) {
-  const masked = op.gemini.apiKey ? `${"•".repeat(Math.min(12, op.gemini.apiKey.length))} ${op.gemini.apiKey.slice(-4)}` : "Chưa có key";
+  const masked = op.gemini.apiKey ? `${"\u2022".repeat(Math.min(12, op.gemini.apiKey.length))} ${op.gemini.apiKey.slice(-4)}` : "Chưa có key";
   return (
     <div className="split">
       <section className="card">
