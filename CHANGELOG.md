@@ -1,3 +1,12 @@
+# PMAI 2.2.0 — 2026-09-29
+
+Phản hồi bình luận hàng loạt. Locator đăng PROFILE / PAGE / GROUP **không đổi**.
+
+- Menu **Phản hồi bình luận**: chọn Facebook Profile/Page, Browser Profile, Facebook Identity, Destination. Chỉ đích READY.
+- Dán URL bài viết. Mỗi dòng trong hộp reply là một câu; hàng đợi lấy ngẫu nhiên.
+- Bấm Trả lời, gõ 3–5 giây, gửi bằng mũi tên hoặc Enter, rồi sang comment kế. Like kèm hoặc like hàng loạt.
+- Nhật ký reply lưu trên máy. Gemini: ô API key, chưa gọi API.
+
 # PMAI 2.1.0 — 2026-09-22
 
 Đăng theo lịch + hàng đợi. Locator PROFILE / PAGE / GROUP **không đổi** (baseline v2.0 giữ nguyên).

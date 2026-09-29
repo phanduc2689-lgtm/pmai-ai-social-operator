@@ -1,18 +1,20 @@
 import { Component, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
-import { BookOpen, FileText, LayoutDashboard, ListTodo, Settings, Shield, Users } from "lucide-react";
+import { BookOpen, FileText, LayoutDashboard, ListTodo, MessagesSquare, Settings, Shield, Users } from "lucide-react";
+import { ReplyWorkspace } from "@/components/reply-screen.tsx";
 import { FirstRun } from "@/components/pmai-first-run.tsx";
 import { PmaiLogo } from "@/components/pmai-logo.tsx";
 import { Accounts, Approve, Compose, Dashboard, HelpScreen, Logs, SettingsScreen } from "@/components/pmai-screens.tsx";
 import { hasElectronHost, hostInvoke } from "@/lib/pmai/ipc.ts";
 import { usePmai } from "@/lib/pmai/use-pmai.ts";
 
-type NavId = "home" | "compose" | "approve" | "accounts" | "logs" | "settings" | "help";
+type NavId = "home" | "compose" | "approve" | "accounts" | "reply" | "logs" | "settings" | "help";
 
 const NAV: { id: NavId; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "home", label: "Tổng quan", icon: LayoutDashboard },
   { id: "compose", label: "Tạo bài đăng", icon: FileText },
   { id: "approve", label: "Duyệt", icon: Shield },
   { id: "accounts", label: "Tài khoản", icon: Users },
+  { id: "reply", label: "Phản hồi bình luận", icon: MessagesSquare },
   { id: "logs", label: "Nhật ký", icon: ListTodo },
   { id: "settings", label: "Cài đặt", icon: Settings },
   { id: "help", label: "Hướng dẫn", icon: BookOpen },
@@ -178,7 +180,7 @@ function PmaiShell() {
           })}
         </nav>
         <p style={{ padding: "12px 16px", fontSize: 11, color: "var(--color-subtle)" }}>
-          v2.1 · {snap.sessions.length || 1} session · local
+          v2.2 · {snap.sessions.length || 1} session · local
         </p>
       </aside>
 
@@ -247,6 +249,8 @@ function PmaiShell() {
             />
           ) : nav === "accounts" ? (
             <Accounts api={api} />
+          ) : nav === "reply" ? (
+            <ReplyWorkspace />
           ) : nav === "logs" ? (
             <Logs api={api} />
           ) : nav === "help" ? (
