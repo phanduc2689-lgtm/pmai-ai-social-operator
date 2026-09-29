@@ -114,16 +114,16 @@ function normalizeScanned(rows, pageName) {
 }
 
 function collectComments() {
-  const replyRe = /^(trả lời|phản hồi|reply)\\b/i;
-  const likeRe = /^(thích|like|bỏ thích|unlike)\\b/i;
-  const timeRe = /^(\\d+\\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\\d+\\s*[smhdw])$/i;
+  const replyRe = /^(trả lời|phản hồi|reply)\b/i;
+  const likeRe = /^(thích|like|bỏ thích|unlike)\b/i;
+  const timeRe = /^(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])$/i;
   const skipLine =
-    /^(thích|like|bỏ thích|unlike|trả lời|phản hồi|reply|chia sẻ|share|xem thêm|gửi tin nhắn|nhắn tin|message|chung|công khai|public|ẩn|hide|bỏ ẩn|xem bản dịch|theo dõi|follow)\\b/i;
-  const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\\s+/g, " ").trim();
+    /^(thích|like|bỏ thích|unlike|trả lời|phản hồi|reply|chia sẻ|share|xem thêm|gửi tin nhắn|nhắn tin|message|chung|công khai|public|ẩn|hide|bỏ ẩn|xem bản dịch|theo dõi|follow)\b/i;
+  const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\s+/g, " ").trim();
   const tidy = (value) =>
     String(value || "")
-      .replace(/\\s+/g, " ")
-      .replace(/\\s+(tác giả|author|top fan|người đóng góp hàng đầu)$/i, "")
+      .replace(/\s+/g, " ")
+      .replace(/\s+(tác giả|author|top fan|người đóng góp hàng đầu)$/i, "")
       .trim();
   const buttons = [...document.querySelectorAll('[role="button"]')];
   const replyButtons = buttons.filter((button) => replyRe.test(labelOf(button)));
@@ -134,7 +134,7 @@ function collectComments() {
     let best = null;
     let bestLen = Infinity;
     for (let depth = 0; depth < 16 && node; depth += 1) {
-      const text = String(node.innerText || "").replace(/\\s+/g, " ").trim();
+      const text = String(node.innerText || "").replace(/\s+/g, " ").trim();
       if (text.length > 12 && text.length < bestLen && text.length < 2200) {
         const replies = [...node.querySelectorAll('[role="button"]')].filter((item) => replyRe.test(labelOf(item)));
         if (replies.length > 0 && replies.length <= 8) {
@@ -147,8 +147,8 @@ function collectComments() {
     }
     if (!best) continue;
     const lines = String(best.innerText || "")
-      .split(/\\n/)
-      .map((line) => line.replace(/\\s+/g, " ").trim())
+      .split(/\n/)
+      .map((line) => line.replace(/\s+/g, " ").trim())
       .filter(Boolean);
     const author = tidy(lines.find((line) => line.length >= 2 && line.length <= 80 && !skipLine.test(line) && !timeRe.test(line)) || "");
     if (!author) continue;
@@ -164,9 +164,9 @@ function collectComments() {
       if (skipLine.test(line)) continue;
       bodyLines.push(line);
     }
-    const body = bodyLines.join(" ").replace(/\\s+/g, " ").trim();
+    const body = bodyLines.join(" ").replace(/\s+/g, " ").trim();
     if (body.length < 2 || isJunkComment(author, body)) continue;
-    const key = `${author}\\n${body.slice(0, 160)}`;
+    const key = `${author}\n${body.slice(0, 160)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const liked = [...best.querySelectorAll('[role="button"]')].some((item) => /bỏ thích|unlike/i.test(labelOf(item)) || item.getAttribute("aria-pressed") === "true");
@@ -193,7 +193,7 @@ async function ensurePost(page, url) {
 }
 
 async function openCommentList(page) {
-  const count = page.getByText(/\\d+\\s*(bình luận|comments?)/i).first();
+  const count = page.getByText(/\d+\s*(bình luận|comments?)/i).first();
   if (await count.isVisible().catch(() => false)) {
     await count.click({ timeout: 4000 }).catch(() => {});
     await sleep(700);
@@ -216,10 +216,10 @@ async function markComment(page, author, body) {
         el.removeAttribute("data-pmai-send");
         el.removeAttribute("data-pmai-like");
       });
-      const replyRe = /^(trả lời|phản hồi|reply)\\b/i;
-      const likeRe = /^(thích|like)\\b/i;
-      const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\\s+/g, " ").trim();
-      const wantedAuthor = authorName.replace(/\\s+/g, " ").trim().toLowerCase().normalize("NFKC");
+      const replyRe = /^(trả lời|phản hồi|reply)\b/i;
+      const likeRe = /^(thích|like)\b/i;
+      const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\s+/g, " ").trim();
+      const wantedAuthor = authorName.replace(/\s+/g, " ").trim().toLowerCase().normalize("NFKC");
       const snippetFold = snippet.toLowerCase().normalize("NFKC");
       const buttons = [...document.querySelectorAll('[role="button"]')].filter((button) => replyRe.test(labelOf(button)));
       let best = null;
@@ -228,7 +228,7 @@ async function markComment(page, author, body) {
       for (const button of buttons) {
         let node = button.parentElement;
         for (let depth = 0; depth < 16 && node; depth += 1) {
-          const text = String(node.innerText || "").replace(/\\s+/g, " ").trim();
+          const text = String(node.innerText || "").replace(/\s+/g, " ").trim();
           const folded = text.toLowerCase().normalize("NFKC");
           if (folded.includes(wantedAuthor) && folded.includes(snippetFold) && text.length < bestLen && text.length < 2400) {
             best = node;
