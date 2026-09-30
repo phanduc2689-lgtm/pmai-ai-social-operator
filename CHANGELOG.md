@@ -1,3 +1,11 @@
+# PMAI 2.2.7 — 2026-10-01
+
+Luồng reply trên Chrome được làm lại cho đơn giản.
+
+- Mở đúng bài, kéo hộp bình luận từ trên xuống.
+- Gặp comment của khách thì bấm Trả lời ngay, gõ một mẫu ngẫu nhiên trong danh sách, rồi Enter.
+- Không còn tìm lại comment theo câu đã lưu, nên không còn báo «Không thấy comment» khi comment đang hiện trên bài.
+
 # PMAI 2.2.6 — 2026-09-30
 
 Hàng đợi reply tìm lại comment trên Chrome thật, và có nút xóa hồ sơ Chrome.
