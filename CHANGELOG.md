@@ -1,3 +1,19 @@
+# PMAI 2.2.5 — 2026-09-30
+
+`npm start` không còn chết ở Rolldown trên Node 24 khi thư mục có dấu cách.
+
+- Đường dẫn `F:\PM TRAVEL\...` làm Node 24 đọc nhầm file `.mjs` thành văn bản khác (`SyntaxError: Unexpected token ']'`).
+- App tự gắn ổ ảo không có dấu cách rồi chạy lại Vite từ ổ đó.
+- Nếu `node_modules\rolldown` không phải file JavaScript, cài đặt báo xóa và cài lại.
+
+# PMAI 2.2.4 — 2026-09-30
+
+Cài đặt Windows không còn chết ở Playwright trên Node 24.
+
+- Bỏ `npx playwright install chrome`. Lệnh đó nổ `SyntaxError` trong `reportActions.js` trên Node 24, và PMAI không dùng Chrome tải về của Playwright.
+- Nếu `node_modules/playwright` bị hỏng, file cài đặt xóa và cài lại `playwright@1.63.0`.
+- App vẫn mở Google Chrome đã cài trên máy, gắn CDP, rồi reply trên bài thật.
+
 # PMAI 2.2.3 — 2026-09-30
 
 Reply lướt và gửi trên Chrome thật. Xóa được dữ liệu local.
