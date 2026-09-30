@@ -17,6 +17,7 @@ const ALLOWLIST = [
   "chrome.close",
   "chrome.replyScan",
   "chrome.replyOne",
+  "chrome.replyNext",
   "chrome.replyLike",
   "chrome.pickImages",
   "chrome.saveMedia",
