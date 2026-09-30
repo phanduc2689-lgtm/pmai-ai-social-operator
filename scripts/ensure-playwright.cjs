@@ -35,3 +35,4 @@ if (fs.existsSync(rolldown)) {
     fail(2, "node_modules\\rolldown bi hong. Se cai lai.");
   }
 }
+
