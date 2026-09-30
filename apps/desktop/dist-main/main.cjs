@@ -32,6 +32,7 @@ const ALLOWLIST = [
   "chrome.autoConnect",
   "chrome.createProfile",
   "chrome.cloneProfile",
+  "chrome.deleteProfile",
   "chrome.pickImages",
   "chrome.saveMedia",
   "chrome.resolveMedia",
@@ -343,6 +344,13 @@ function registerIpc() {
     wrap(async (payload) => {
       if (typeof adapter().cloneProfile === "function") return adapter().cloneProfile(payload || {});
       throw Object.assign(new Error("Adapter khong ho tro cloneProfile."), { code: "CAPABILITY_MISSING" });
+    }),
+  );
+  handleOnce(
+    "chrome.deleteProfile",
+    wrap(async (payload) => {
+      if (typeof adapter().deleteProfile === "function") return adapter().deleteProfile(payload || {});
+      throw Object.assign(new Error("Adapter khong ho tro deleteProfile."), { code: "CAPABILITY_MISSING" });
     }),
   );
   handleOnce(
