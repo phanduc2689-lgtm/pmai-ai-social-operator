@@ -147,6 +147,7 @@ export function usePmai() {
       return run(() => engine.addDestination({ type: "PROFILE", name, url }));
     },
     removePage: (id: string) => run(() => engine.removePage(id)),
+    removeSession: (sessionId: string) => run(() => engine.removeSession(sessionId)),
     createDraft: (brief: string) => run(() => engine.createDraft(brief)),
     updateDraft: (id: string, body: string, media?: MediaAsset[]) => run(() => engine.updateDraft(id, body, media ?? [])),
     addImage: (id: string, file: LocalFileMeta) => run(() => engine.addLocalMedia(id, file)),
