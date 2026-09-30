@@ -1,3 +1,29 @@
+# PMAI 2.2.3 — 2026-09-30
+
+Reply lướt và gửi trên Chrome thật. Xóa được dữ liệu local.
+
+- Quét comment trong hộp thoại bài viết: chỉ nhận comment có giờ đăng, bỏ hàng nút «Gửi tin nhắn / Ẩn».
+- Lướt danh sách comment trong dialog, bấm Trả lời, gõ vào ô trả lời — không gõ vào ô «Bình luận dưới tên».
+- Hàng đợi trên app Electron không chạy bài mẫu. Chưa đọc được Chrome thì dừng, không giả lập gửi.
+- «Xóa dữ liệu local» xóa `pmai.reply.v1`. Dữ liệu comment thật không bị kéo lại thành bài mẫu khi mở lại.
+
+# PMAI 2.2.2 — 2026-09-30
+
+Reply bấm được nút Trả lời trên Chrome đang mở.
+
+- Hàng đợi tự gắn lại Chrome nếu hồ sơ còn cổng điều khiển. Không còn dừng ở «Browser chưa launch» khi Chrome vẫn mở.
+- Bỏ dòng rác của Facebook (Gửi tin nhắn, Chung, Ẩn). Chỉ reply comment người thật.
+- Bấm Trả lời ngay trên comment, rồi gõ vào ô vừa hiện.
+
+# PMAI 2.2.1 — 2026-09-30
+
+Hàng đợi reply chạy trên Chrome CDP đã gắn, không còn chỉ khung mẫu.
+
+- Vào bước 3: mở URL bài viết trên Chrome đang gắn, đọc comment thật (nút Trả lời).
+- Chạy hàng đợi: bấm Trả lời, gõ 3–5 giây, gửi mũi tên xanh hoặc Enter, like nếu bật.
+- Badge **Chrome CDP**. Nếu chưa gắn Chrome thì vẫn là **CDP mẫu** và không gửi Facebook.
+- Checkpoint / captcha: dừng, không vượt. Locator đăng bài không đổi.
+
 # PMAI 2.2.0 — 2026-09-29
 
 Phản hồi bình luận hàng loạt. Locator đăng PROFILE / PAGE / GROUP **không đổi**.
