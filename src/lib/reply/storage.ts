@@ -60,10 +60,6 @@ export function loadPersisted(): PersistedReply | null {
         })
       : base.selection;
     const comments = Array.isArray(parsed.comments) ? parsed.comments.filter(isComment) : base.comments;
-    const known = new Set(base.comments.map((row) => row.id));
-    const commentIds = new Set(comments.map((row) => row.id));
-    const thread =
-      known.size === commentIds.size && [...known].every((id) => commentIds.has(id)) ? comments : base.comments;
     const logs = Array.isArray(parsed.logs) ? parsed.logs.filter(isLog).slice(0, 300) : [];
     const geminiRaw = isRecord(parsed.gemini) ? parsed.gemini : {};
     return {
@@ -71,7 +67,7 @@ export function loadPersisted(): PersistedReply | null {
       postUrl: typeof parsed.postUrl === "string" ? parsed.postUrl : "",
       replyDraft: typeof parsed.replyDraft === "string" ? parsed.replyDraft : base.replyDraft,
       likeWithReply: parsed.likeWithReply !== false,
-      comments: thread,
+      comments,
       logs,
       gemini: {
         model: geminiRaw.model === "gemini-2.5-pro" ? "gemini-2.5-pro" : "gemini-2.5-flash",
@@ -108,4 +104,9 @@ function isLog(value: unknown): value is LogEntry {
 export function savePersisted(state: PersistedReply): void {
   if (typeof localStorage === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+export function clearPersisted(): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.removeItem(STORAGE_KEY);
 }
