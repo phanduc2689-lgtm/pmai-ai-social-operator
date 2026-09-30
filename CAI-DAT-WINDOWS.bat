@@ -35,10 +35,19 @@ if not exist node_modules (
   echo [1/3] node_modules da co.
 )
 
-echo [2/3] Cai Chrome cho Playwright (lan dau)...
-call npx playwright install chrome
-if errorlevel 1 (
-  echo playwright install chrome loi — van co the dung neu da cai Google Chrome.
+echo [2/3] Kiem tra Playwright. Khong chay "npx playwright install chrome" — lenh do loi tren Node 24.
+node scripts\ensure-playwright.cjs
+if errorlevel 2 (
+  echo Playwright hong hoac thieu. Dang cai lai playwright@1.63.0 ...
+  if exist node_modules\playwright rmdir /s /q node_modules\playwright
+  if exist node_modules\playwright-core rmdir /s /q node_modules\playwright-core
+  call npm install playwright@1.63.0 --save-dev --no-fund --no-audit
+  node scripts\ensure-playwright.cjs
+  if errorlevel 1 (
+    echo Van loi. Xoa ca thu muc node_modules roi chay lai file nay.
+    pause
+    exit /b 1
+  )
 )
 
 echo.
