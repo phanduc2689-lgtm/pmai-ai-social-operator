@@ -578,6 +578,12 @@ async function replyOnComment(payload = {}) {
   return reply.replyToComment(live.page, payload || {});
 }
 
+async function replyNextComment(payload = {}) {
+  const reply = require("./facebook-reply.cjs");
+  const live = await ensureReplyPage();
+  return reply.replyNext(live.page, payload || {});
+}
+
 async function likePostComments(payload = {}) {
   const reply = require("./facebook-reply.cjs");
   const live = await ensureReplyPage();
@@ -602,6 +608,7 @@ module.exports = {
   closeBrowser,
   scanPostComments,
   replyOnComment,
+  replyNextComment,
   likePostComments,
   isCdpUp,
   isComposerCue,
