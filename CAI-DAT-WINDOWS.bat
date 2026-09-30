@@ -15,6 +15,26 @@ echo === PMAI AI Social Operator ===
 echo Thu muc: %cd%
 echo.
 
+REM Node 24 doc sai file .mjs neu duong dan co dau cach (vi du "PM TRAVEL").
+echo %cd% | find " " >nul
+if not errorlevel 1 (
+  echo Duong dan co dau cach. Gan o dia ao de Node 24 doc dung JavaScript.
+  for %%D in (P Q R S T) do (
+    subst %%D: "%cd%" >nul 2>&1
+    if exist %%D:\package.json (
+      %%D:
+      cd \
+      echo Dang cai tu %%D:\
+      goto mapped
+    )
+    subst %%D: /d >nul 2>&1
+  )
+  echo Khong gan duoc o dia ao. Doi thu muc sang F:\pmai roi chay lai.
+  pause
+  exit /b 1
+)
+:mapped
+
 if not exist package.json (
   echo Thieu package.json.
   echo Neu ban tai ZIP: vao dung thu muc co file CAI-DAT-WINDOWS.bat va package.json.
