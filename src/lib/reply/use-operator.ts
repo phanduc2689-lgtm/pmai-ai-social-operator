@@ -6,7 +6,6 @@ import {
   findBrowser,
   findDestination,
   findIdentity,
-  freshThread,
   humanTypeMs,
   normalizeSelection,
   parsePostUrl,
@@ -20,6 +19,7 @@ import {
   type ThreadComment,
 } from "./catalog.ts";
 import {
+  clearPersisted,
   defaultPersisted,
   loadPersisted,
   savePersisted,
@@ -101,7 +101,7 @@ export function useOperator() {
   const [running, setRunning] = useState<RunKind>(null);
   const [paused, setPaused] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [liveMode, setLiveMode] = useState(false);
+  const [liveMode, setLiveMode] = useState(() => hasElectronHost());
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
 
@@ -315,15 +315,32 @@ export function useOperator() {
     busyRef.current = true;
     setRunning("reply");
     setLiveMode(true);
+    setScanError("");
+    const hadSample = isSampleThread(commentsRef.current);
+    if (hadSample) await scanLive(true);
+    const targetIds = hadSample
+      ? commentsRef.current.filter((row) => row.role === "customer" && !row.reply).map((row) => row.id)
+      : ids;
+    const queue = commentsRef.current.filter(
+      (row) => targetIds.includes(row.id) && row.role === "customer" && !row.reply && !isSampleThread([row]),
+    );
+    if (queue.length === 0) {
+      const message = scanError || "Chưa đọc được comment trên Chrome. Gắn Chrome, mở đúng bài, rồi bấm Tải comment.";
+      setScanError(message);
+      pushLog({ action: "Lỗi Chrome", target: "Hàng đợi", detail: message, result: "FAIL" });
+      setRunning(null);
+      busyRef.current = false;
+      return;
+    }
     const pageName = destination?.name || identity?.name || "";
     pushLog({ action: "Mở bài", target: "Chrome", detail: postUrl.trim(), result: "OK" });
     let lastLine: string | null = null;
     let failures = 0;
     try {
-      for (let index = 0; index < ids.length; index += 1) {
+      for (let index = 0; index < queue.length; index += 1) {
         await gate(runId);
-        const id = ids[index];
-        const comment = commentsRef.current.find((row) => row.id === id);
+        const comment = queue[index];
+        const id = comment.id;
         if (!comment || comment.role !== "customer" || comment.reply) {
           pushLog({
             action: "Bỏ qua",
@@ -364,6 +381,7 @@ export function useOperator() {
         if (!res.ok || !res.data) {
           failures += 1;
           const message = res.error?.message ?? "Không gửi được";
+          setScanError(message);
           pushLog({ action: "Lỗi Chrome", target: comment.author, detail: message, result: "FAIL" });
           if (failures >= 3 || /checkpoint|captcha/i.test(message)) break;
           continue;
@@ -389,7 +407,7 @@ export function useOperator() {
         await sleep(200, runId);
       }
       if (ctrl.current.runId === runId) {
-        pushLog({ action: "Xong hàng đợi", target: "Chrome", detail: `${ids.length} comment`, result: "OK" });
+        pushLog({ action: "Xong hàng đợi", target: "Chrome", detail: `${queue.length} comment`, result: "OK" });
         setPhase({ type: "idle" });
         setActiveId(null);
       }
@@ -595,14 +613,21 @@ export function useOperator() {
 
   function resetThread() {
     if (running || paused) stop(true);
-    if (hasElectronHost()) {
-      scannedUrl.current = "";
+    clearPersisted();
+    scannedUrl.current = "";
+    setComments([]);
+    commentsRef.current = [];
+    setLogs([
+      newLog({
+        action: "Xóa dữ liệu local",
+        target: "Reply",
+        detail: "Đã xóa pmai.reply.v1. Không còn bài mẫu.",
+        result: "OK",
+      }),
+    ]);
+    if (hasElectronHost() && parsePostUrl(postUrl).ok) {
       void scanLive(true);
-      return;
     }
-    setComments(freshThread());
-    commentsRef.current = freshThread();
-    pushLog({ action: "Đặt lại bài", target: "Bài mẫu", detail: "Xóa reply và like trên khung xem trước", result: "OK" });
   }
 
   function clearLogs() {
