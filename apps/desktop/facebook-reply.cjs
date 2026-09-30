@@ -116,16 +116,19 @@ function normalizeScanned(rows, pageName) {
 function collectComments() {
   const replyRe = /^(trả lời|phản hồi|reply)\b/i;
   const likeRe = /^(thích|like|bỏ thích|unlike)\b/i;
-  const timeRe = /^(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])$/i;
+  const timeLineRe = /^(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])$/i;
+  const timeRe = /(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])/i;
+  const nameTimeRe = /^(.{2,80}?)\s*[·•|–—-]\s*(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong)$/i;
   const skipLine =
-    /^(thích|like|bỏ thích|unlike|trả lời|phản hồi|reply|chia sẻ|share|xem thêm|gửi tin nhắn|nhắn tin|message|chung|công khai|public|ẩn|hide|bỏ ẩn|xem bản dịch|theo dõi|follow)\b/i;
+    /^(thích|like|bỏ thích|unlike|trả lời|phản hồi|reply|chia sẻ|share|xem thêm|gửi tin nhắn|nhắn tin|message|chung|công khai|public|ẩn|hide|bỏ ẩn|xem bản dịch|theo dõi|follow|tác giả|author)\b/i;
   const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\s+/g, " ").trim();
   const tidy = (value) =>
     String(value || "")
       .replace(/\s+/g, " ")
       .replace(/\s+(tác giả|author|top fan|người đóng góp hàng đầu)$/i, "")
       .trim();
-  const buttons = [...document.querySelectorAll('[role="button"]')];
+  const root = typeof document.querySelector === "function" ? document.querySelector('[role="dialog"]') || document : document;
+  const buttons = [...root.querySelectorAll('[role="button"]')];
   const replyButtons = buttons.filter((button) => replyRe.test(labelOf(button)));
   const found = [];
   const seen = new Set();
@@ -134,8 +137,9 @@ function collectComments() {
     let best = null;
     let bestLen = Infinity;
     for (let depth = 0; depth < 16 && node; depth += 1) {
-      const text = String(node.innerText || "").replace(/\s+/g, " ").trim();
-      if (text.length > 12 && text.length < bestLen && text.length < 2200) {
+      const raw = String(node.innerText || "");
+      const text = raw.replace(/\s+/g, " ").trim();
+      if (text.length > 12 && text.length < bestLen && text.length < 2200 && timeRe.test(raw)) {
         const replies = [...node.querySelectorAll('[role="button"]')].filter((item) => replyRe.test(labelOf(item)));
         if (replies.length > 0 && replies.length <= 8) {
           best = node;
@@ -150,14 +154,22 @@ function collectComments() {
       .split(/\n/)
       .map((line) => line.replace(/\s+/g, " ").trim())
       .filter(Boolean);
-    const author = tidy(lines.find((line) => line.length >= 2 && line.length <= 80 && !skipLine.test(line) && !timeRe.test(line)) || "");
-    if (!author) continue;
-    const start = lines.findIndex((line) => tidy(line) === author || line.startsWith(author));
-    const bodyLines = [];
+    let author = "";
     let timeLabel = "";
-    for (const line of lines.slice(Math.max(0, start) + 1)) {
+    const bodyLines = [];
+    for (const line of lines) {
+      const named = line.match(nameTimeRe);
+      if (named && !author) {
+        author = tidy(named[1]);
+        timeLabel = named[2];
+        continue;
+      }
+      if (!author) {
+        if (line.length >= 2 && line.length <= 80 && !skipLine.test(line) && !timeLineRe.test(line)) author = tidy(line);
+        continue;
+      }
       if (replyRe.test(line) || likeRe.test(line)) break;
-      if (timeRe.test(line)) {
+      if (timeLineRe.test(line)) {
         timeLabel = timeLabel || line;
         continue;
       }
@@ -165,11 +177,13 @@ function collectComments() {
       bodyLines.push(line);
     }
     const body = bodyLines.join(" ").replace(/\s+/g, " ").trim();
-    if (body.length < 2 || isJunkComment(author, body)) continue;
+    if (!author || body.length < 2) continue;
     const key = `${author}\n${body.slice(0, 160)}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const liked = [...best.querySelectorAll('[role="button"]')].some((item) => /bỏ thích|unlike/i.test(labelOf(item)) || item.getAttribute("aria-pressed") === "true");
+    const liked = [...best.querySelectorAll('[role="button"]')].some(
+      (item) => (likeRe.test(labelOf(item)) && /bỏ thích|unlike/i.test(labelOf(item))) || item.getAttribute("aria-pressed") === "true",
+    );
     found.push({ author, body, liked, timeLabel });
   }
   return found;
@@ -192,6 +206,32 @@ async function ensurePost(page, url) {
   assertSafe(page);
 }
 
+async function scrollCommentPane(page) {
+  for (let i = 0; i < 8; i += 1) {
+    const moved = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]') || document.body;
+      let scroller = null;
+      let best = 0;
+      for (const el of [dialog, ...dialog.querySelectorAll("div")]) {
+        const delta = el.scrollHeight - el.clientHeight;
+        if (delta > best && el.clientHeight > 140) {
+          best = delta;
+          scroller = el;
+        }
+      }
+      if (!scroller) {
+        window.scrollBy(0, 640);
+        return false;
+      }
+      const before = scroller.scrollTop;
+      scroller.scrollTop = Math.min(scroller.scrollHeight, before + Math.max(480, scroller.clientHeight * 0.85));
+      return scroller.scrollTop > before + 12;
+    });
+    await sleep(420);
+    if (!moved && i > 1) break;
+  }
+}
+
 async function openCommentList(page) {
   const count = page.getByText(/\d+\s*(bình luận|comments?)/i).first();
   if (await count.isVisible().catch(() => false)) {
@@ -199,7 +239,9 @@ async function openCommentList(page) {
     await sleep(700);
   }
   for (let i = 0; i < 6; i += 1) {
-    const more = page.getByRole("button", { name: /xem thêm bình luận|view more comments|xem thêm câu trả lời|view more replies|xem các bình luận trước|xem thêm/i }).first();
+    const more = page
+      .getByRole("button", { name: /xem thêm bình luận|view more comments|xem thêm câu trả lời|view more replies|xem các bình luận trước|xem thêm/i })
+      .first();
     if (!(await more.isVisible().catch(() => false))) break;
     await more.click({ timeout: 4000 }).catch(() => {});
     await sleep(650);
@@ -251,6 +293,28 @@ async function markComment(page, author, body) {
   );
 }
 
+async function markSend(page) {
+  return page.evaluate(() => {
+    const box = document.querySelector("[data-pmai-editor='1']") || document.querySelector("[data-pmai-target='1'] [contenteditable='true']");
+    const root = (box && box.closest("form")) || (box && box.parentElement && box.parentElement.parentElement) || document.querySelector("[data-pmai-target='1']") || document.body;
+    const labelOf = (el) => String(el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+    const buttons = [...root.querySelectorAll('[role="button"], div[aria-label], span[aria-label]')];
+    const labeled = buttons.find((button) => /^(bình luận|comment|gửi|send|đăng)$/i.test(labelOf(button)));
+    let send = labeled;
+    if (!send) {
+      send = [...buttons].reverse().find((button) => {
+        const label = `${labelOf(button)} ${button.innerText || ""}`;
+        if (/thích|like|trả lời|reply|biểu cảm|emoji|sticker|gif|ảnh|photo|camera/i.test(label)) return false;
+        const rect = button.getBoundingClientRect();
+        return rect.width >= 16 && rect.width <= 72 && rect.height >= 16 && rect.height <= 72;
+      });
+    }
+    if (!send) return false;
+    send.setAttribute("data-pmai-send", "1");
+    return true;
+  });
+}
+
 async function clickMarkedReply(page) {
   const clicked = await page.evaluate(() => {
     const button = document.querySelector("[data-pmai-reply='1']");
@@ -277,10 +341,13 @@ async function markEditor(page) {
       const style = window.getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden") continue;
       const label = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("aria-placeholder") || ""}`;
+      const mainComposer = /bình luận dưới tên|viết bình luận|write a comment|comment as /i.test(label) && !/trả lời|reply/i.test(label);
+      if (mainComposer) continue;
       const replyBox = /trả lời|reply|bình luận|comment|viết|write/i.test(label) || el.getAttribute("contenteditable") === "true";
       if (!replyBox) continue;
       const dy = rect.top - origin;
-      const score = dy >= -30 && dy < 460 ? dy : 2000 + Math.abs(dy);
+      const replyBias = /trả lời|reply/i.test(label) ? -40 : 0;
+      const score = dy >= -30 && dy < 460 ? dy + replyBias : 2000 + Math.abs(dy);
       if (score < bestScore) {
         bestScore = score;
         best = el;
@@ -304,28 +371,6 @@ async function editorLocator(page) {
   return null;
 }
 
-async function markSend(page) {
-  return page.evaluate(() => {
-    const box = document.querySelector("[data-pmai-editor='1']") || document.querySelector("[data-pmai-target='1'] [contenteditable='true']");
-    const root = (box && box.closest("form")) || (box && box.parentElement && box.parentElement.parentElement) || document.querySelector("[data-pmai-target='1']") || document.body;
-    const labelOf = (el) => String(el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
-    const buttons = [...root.querySelectorAll('[role="button"], div[aria-label], span[aria-label]')];
-    const labeled = buttons.find((button) => /^(bình luận|comment|gửi|send|đăng)$/i.test(labelOf(button)));
-    let send = labeled;
-    if (!send) {
-      send = [...buttons].reverse().find((button) => {
-        const label = `${labelOf(button)} ${button.innerText || ""}`;
-        if (/thích|like|trả lời|reply|biểu cảm|emoji|sticker|gif|ảnh|photo|camera/i.test(label)) return false;
-        const rect = button.getBoundingClientRect();
-        return rect.width >= 16 && rect.width <= 72 && rect.height >= 16 && rect.height <= 72;
-      });
-    }
-    if (!send) return false;
-    send.setAttribute("data-pmai-send", "1");
-    return true;
-  });
-}
-
 async function typeHuman(page, text) {
   const chars = Array.from(String(text || ""));
   const total = chars.length === 0 ? 0 : humanTypeMs();
@@ -345,6 +390,7 @@ async function typeHuman(page, text) {
 async function scanPost(page, payload = {}) {
   await ensurePost(page, payload.url);
   await openCommentList(page);
+  await scrollCommentPane(page);
   const raw = await page.evaluate(collectComments);
   const comments = normalizeScanned(raw, payload.pageName || "");
   return { comments, pageUrl: page.url(), count: comments.length };
@@ -360,6 +406,7 @@ async function replyToComment(page, payload = {}) {
   let marked = await markComment(page, author, body);
   if (!marked) {
     await openCommentList(page);
+    await scrollCommentPane(page);
     marked = await markComment(page, author, body);
   }
   if (!marked) throw err("UI_CHANGED", `Không thấy comment của ${author} trên Chrome. Mở đúng bài, kéo comment hiện ra, rồi tải lại.`);
@@ -397,7 +444,9 @@ async function replyToComment(page, payload = {}) {
     await sleep(400);
   }
   let liked = false;
-  if (payload.likeAfter) liked = await clickLike(page, author, body);
+  if (payload.likeAfter) {
+    liked = await clickLike(page, author, body);
+  }
   return { via: used, typedMs, liked, author };
 }
 
