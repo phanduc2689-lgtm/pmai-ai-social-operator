@@ -165,6 +165,27 @@ function clonePmaiProfile(sourceId, displayName) {
   return getProfile(created.id);
 }
 
+function deletePmaiProfile(id) {
+  const profile = getProfile(id);
+  if (!profile) {
+    const error = new Error("Không thấy hồ sơ Chrome.");
+    error.code = "NOT_READY";
+    throw error;
+  }
+  if (profile.locked) {
+    const error = new Error("Hồ sơ đang mở. Đóng cửa sổ Chrome của hồ sơ này rồi xóa.");
+    error.code = "IDLE_BLOCKED";
+    throw error;
+  }
+  const root = path.resolve(profilesRoot());
+  const dir = path.resolve(profile.userDataDir);
+  if (dir !== root && dir.startsWith(root + path.sep)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  writeRegistry(readRegistry().filter((row) => row.id !== profile.id));
+  return { id: profile.id, displayName: profile.displayName, removed: true };
+}
+
 function touchProfile(id, patch = {}) {
   writeRegistry(readRegistry().map((r) => (r.id === id ? { ...r, ...patch, lastUsedAt: new Date().toISOString() } : r)));
   return getProfile(id);
@@ -189,6 +210,7 @@ module.exports = {
   pickLoggedInChromeProfile,
   createPmaiProfile,
   clonePmaiProfile,
+  deletePmaiProfile,
   getProfile,
   touchProfile,
   detectFacebook,
