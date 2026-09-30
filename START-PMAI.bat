@@ -27,6 +27,25 @@ if exist .git (
   pause
 )
 
+echo %cd% | find " " >nul
+if not errorlevel 1 (
+  echo Duong dan co dau cach. Gan o dia ao de Node 24 doc dung JavaScript.
+  for %%D in (P Q R S T) do (
+    subst %%D: "%cd%" >nul 2>&1
+    if exist %%D:\package.json (
+      %%D:
+      cd \
+      echo Dang chay tu %%D:\
+      goto mapped
+    )
+    subst %%D: /d >nul 2>&1
+  )
+  echo Khong gan duoc o dia ao. Doi thu muc sang F:\pmai roi chay lai.
+  pause
+  exit /b 1
+)
+:mapped
+
 echo Dong electron.exe cu (neu con giu lock, cua so se khong hien)...
 taskkill /F /IM electron.exe >nul 2>&1
 timeout /t 1 /nobreak >nul
