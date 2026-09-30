@@ -64,6 +64,17 @@ function humanTypeMs() {
   return 3000 + Math.floor(Math.random() * 2001);
 }
 
+function isJunkComment(author, body) {
+  const ui =
+    /^(gửi tin nhắn|nhắn tin|message|inbox|chung|công khai|public|ẩn|ẩn bình luận|hide|bỏ ẩn|thích|like|bỏ thích|unlike|trả lời|phản hồi|reply|chia sẻ|share|xem thêm|xem bản dịch|theo dõi|follow)$/i;
+  if (ui.test(String(author || "").trim())) return true;
+  const words = String(body || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return words.length > 0 && words.length <= 4 && words.every((word) => ui.test(word));
+}
+
 function samePost(current, target) {
   try {
     const here = new URL(current);
@@ -84,7 +95,7 @@ function normalizeScanned(rows, pageName) {
     const body = String((row && row.body) || "")
       .replace(/\s+/g, " ")
       .trim();
-    if (!author || body.length < 2) continue;
+    if (!author || body.length < 2 || isJunkComment(author, body)) continue;
     const id = commentId(author, body);
     if (seen.has(id)) continue;
     seen.add(id);
@@ -103,18 +114,21 @@ function normalizeScanned(rows, pageName) {
 }
 
 function collectComments() {
-  const replyRe = /^(trả lời|phản hồi|reply)$/i;
-  const likeRe = /^(thích|like)$/i;
-  const unlikeRe = /^(bỏ thích|unlike)$/i;
-  const timeRe = /^(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])$/i;
-  const skipLine = /^(thích|like|bỏ thích|unlike|trả lời|phản hồi|reply|chia sẻ|share|xem thêm)/i;
+  const replyRe = /^(trả lời|phản hồi|reply)\b/i;
+  const likeRe = /^(thích|like|bỏ thích|unlike)\b/i;
+  const timeLineRe = /^(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])$/i;
+  const timeRe = /(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])/i;
+  const nameTimeRe = /^(.{2,80}?)\s*[·•|–—-]\s*(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong)$/i;
+  const skipLine =
+    /^(thích|like|bỏ thích|unlike|trả lời|phản hồi|reply|chia sẻ|share|xem thêm|gửi tin nhắn|nhắn tin|message|chung|công khai|public|ẩn|hide|bỏ ẩn|xem bản dịch|theo dõi|follow|tác giả|author)\b/i;
   const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\s+/g, " ").trim();
   const tidy = (value) =>
     String(value || "")
       .replace(/\s+/g, " ")
       .replace(/\s+(tác giả|author|top fan|người đóng góp hàng đầu)$/i, "")
       .trim();
-  const buttons = [...document.querySelectorAll('[role="button"]')];
+  const root = typeof document.querySelector === "function" ? document.querySelector('[role="dialog"]') || document : document;
+  const buttons = [...root.querySelectorAll('[role="button"]')];
   const replyButtons = buttons.filter((button) => replyRe.test(labelOf(button)));
   const found = [];
   const seen = new Set();
@@ -123,8 +137,9 @@ function collectComments() {
     let best = null;
     let bestLen = Infinity;
     for (let depth = 0; depth < 16 && node; depth += 1) {
-      const text = String(node.innerText || "").replace(/\s+/g, " ").trim();
-      if (text.length > 12 && text.length < bestLen && text.length < 2200) {
+      const raw = String(node.innerText || "");
+      const text = raw.replace(/\s+/g, " ").trim();
+      if (text.length > 12 && text.length < bestLen && text.length < 2200 && timeRe.test(raw)) {
         const replies = [...node.querySelectorAll('[role="button"]')].filter((item) => replyRe.test(labelOf(item)));
         if (replies.length > 0 && replies.length <= 8) {
           best = node;
@@ -139,14 +154,22 @@ function collectComments() {
       .split(/\n/)
       .map((line) => line.replace(/\s+/g, " ").trim())
       .filter(Boolean);
-    const author = tidy(lines.find((line) => line.length >= 2 && line.length <= 80 && !skipLine.test(line) && !timeRe.test(line)) || "");
-    if (!author) continue;
-    const start = lines.findIndex((line) => tidy(line) === author || line.startsWith(author));
-    const bodyLines = [];
+    let author = "";
     let timeLabel = "";
-    for (const line of lines.slice(Math.max(0, start) + 1)) {
-      if (replyRe.test(line) || likeRe.test(line) || unlikeRe.test(line)) break;
-      if (timeRe.test(line)) {
+    const bodyLines = [];
+    for (const line of lines) {
+      const named = line.match(nameTimeRe);
+      if (named && !author) {
+        author = tidy(named[1]);
+        timeLabel = named[2];
+        continue;
+      }
+      if (!author) {
+        if (line.length >= 2 && line.length <= 80 && !skipLine.test(line) && !timeLineRe.test(line)) author = tidy(line);
+        continue;
+      }
+      if (replyRe.test(line) || likeRe.test(line)) break;
+      if (timeLineRe.test(line)) {
         timeLabel = timeLabel || line;
         continue;
       }
@@ -154,12 +177,12 @@ function collectComments() {
       bodyLines.push(line);
     }
     const body = bodyLines.join(" ").replace(/\s+/g, " ").trim();
-    if (body.length < 2) continue;
+    if (!author || body.length < 2) continue;
     const key = `${author}\n${body.slice(0, 160)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const liked = [...best.querySelectorAll('[role="button"]')].some(
-      (item) => unlikeRe.test(labelOf(item)) || item.getAttribute("aria-pressed") === "true",
+      (item) => (likeRe.test(labelOf(item)) && /bỏ thích|unlike/i.test(labelOf(item))) || item.getAttribute("aria-pressed") === "true",
     );
     found.push({ author, body, liked, timeLabel });
   }
@@ -181,6 +204,32 @@ async function ensurePost(page, url) {
   await page.goto(target, { waitUntil: "domcontentloaded", timeout: 45000 });
   await sleep(900);
   assertSafe(page);
+}
+
+async function scrollCommentPane(page) {
+  for (let i = 0; i < 8; i += 1) {
+    const moved = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]') || document.body;
+      let scroller = null;
+      let best = 0;
+      for (const el of [dialog, ...dialog.querySelectorAll("div")]) {
+        const delta = el.scrollHeight - el.clientHeight;
+        if (delta > best && el.clientHeight > 140) {
+          best = delta;
+          scroller = el;
+        }
+      }
+      if (!scroller) {
+        window.scrollBy(0, 640);
+        return false;
+      }
+      const before = scroller.scrollTop;
+      scroller.scrollTop = Math.min(scroller.scrollHeight, before + Math.max(480, scroller.clientHeight * 0.85));
+      return scroller.scrollTop > before + 12;
+    });
+    await sleep(420);
+    if (!moved && i > 1) break;
+  }
 }
 
 async function openCommentList(page) {
@@ -209,8 +258,8 @@ async function markComment(page, author, body) {
         el.removeAttribute("data-pmai-send");
         el.removeAttribute("data-pmai-like");
       });
-      const replyRe = /^(trả lời|phản hồi|reply)$/i;
-      const likeRe = /^(thích|like)$/i;
+      const replyRe = /^(trả lời|phản hồi|reply)\b/i;
+      const likeRe = /^(thích|like)\b/i;
       const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\s+/g, " ").trim();
       const wantedAuthor = authorName.replace(/\s+/g, " ").trim().toLowerCase().normalize("NFKC");
       const snippetFold = snippet.toLowerCase().normalize("NFKC");
@@ -246,11 +295,10 @@ async function markComment(page, author, body) {
 
 async function markSend(page) {
   return page.evaluate(() => {
-    const root = document.querySelector("[data-pmai-target='1']") || document.body;
-    const box = root.querySelector('[contenteditable="true"]') || document.querySelector('[contenteditable="true"][aria-label*="rả lời" i], [contenteditable="true"][aria-label*="reply" i]');
-    const scope = (box && box.parentElement && box.parentElement.parentElement) || root;
+    const box = document.querySelector("[data-pmai-editor='1']") || document.querySelector("[data-pmai-target='1'] [contenteditable='true']");
+    const root = (box && box.closest("form")) || (box && box.parentElement && box.parentElement.parentElement) || document.querySelector("[data-pmai-target='1']") || document.body;
     const labelOf = (el) => String(el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
-    const buttons = [...scope.querySelectorAll('[role="button"], div[aria-label], span[aria-label]')];
+    const buttons = [...root.querySelectorAll('[role="button"], div[aria-label], span[aria-label]')];
     const labeled = buttons.find((button) => /^(bình luận|comment|gửi|send|đăng)$/i.test(labelOf(button)));
     let send = labeled;
     if (!send) {
@@ -267,13 +315,59 @@ async function markSend(page) {
   });
 }
 
+async function clickMarkedReply(page) {
+  const clicked = await page.evaluate(() => {
+    const button = document.querySelector("[data-pmai-reply='1']");
+    if (!button) return false;
+    button.scrollIntoView({ block: "center", inline: "nearest" });
+    button.click();
+    return true;
+  });
+  if (clicked) return;
+  await page.locator("[data-pmai-reply='1']").first().click({ timeout: 6000, force: true });
+}
+
+async function markEditor(page) {
+  return page.evaluate(() => {
+    document.querySelectorAll("[data-pmai-editor]").forEach((el) => el.removeAttribute("data-pmai-editor"));
+    const target = document.querySelector("[data-pmai-target='1']");
+    const origin = target ? target.getBoundingClientRect().bottom : 0;
+    const nodes = [...document.querySelectorAll('[contenteditable="true"], [role="textbox"]')];
+    let best = null;
+    let bestScore = Infinity;
+    for (const el of nodes) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 40 || rect.height < 8) continue;
+      const style = window.getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") continue;
+      const label = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("aria-placeholder") || ""}`;
+      const mainComposer = /bình luận dưới tên|viết bình luận|write a comment|comment as /i.test(label) && !/trả lời|reply/i.test(label);
+      if (mainComposer) continue;
+      const replyBox = /trả lời|reply|bình luận|comment|viết|write/i.test(label) || el.getAttribute("contenteditable") === "true";
+      if (!replyBox) continue;
+      const dy = rect.top - origin;
+      const replyBias = /trả lời|reply/i.test(label) ? -40 : 0;
+      const score = dy >= -30 && dy < 460 ? dy + replyBias : 2000 + Math.abs(dy);
+      if (score < bestScore) {
+        bestScore = score;
+        best = el;
+      }
+    }
+    if (!best) return false;
+    best.setAttribute("data-pmai-editor", "1");
+    best.focus();
+    return true;
+  });
+}
+
 async function editorLocator(page) {
-  const inside = page.locator("[data-pmai-target='1'] [contenteditable='true']");
-  if (await inside.count().catch(() => 0)) return inside.last();
-  const labeled = page.locator(
-    '[contenteditable="true"][aria-label*="rả lời" i], [contenteditable="true"][aria-label*="reply" i], [role="textbox"][aria-label*="rả lời" i], [role="textbox"][aria-label*="reply" i]',
-  );
-  if (await labeled.count().catch(() => 0)) return labeled.last();
+  for (let i = 0; i < 8; i += 1) {
+    if (await markEditor(page)) {
+      const marked = page.locator("[data-pmai-editor='1']").last();
+      if (await marked.count().catch(() => 0)) return marked;
+    }
+    await sleep(350);
+  }
   return null;
 }
 
@@ -296,6 +390,7 @@ async function typeHuman(page, text) {
 async function scanPost(page, payload = {}) {
   await ensurePost(page, payload.url);
   await openCommentList(page);
+  await scrollCommentPane(page);
   const raw = await page.evaluate(collectComments);
   const comments = normalizeScanned(raw, payload.pageName || "");
   return { comments, pageUrl: page.url(), count: comments.length };
@@ -311,12 +406,14 @@ async function replyToComment(page, payload = {}) {
   let marked = await markComment(page, author, body);
   if (!marked) {
     await openCommentList(page);
+    await scrollCommentPane(page);
     marked = await markComment(page, author, body);
   }
   if (!marked) throw err("UI_CHANGED", `Không thấy comment của ${author} trên Chrome. Mở đúng bài, kéo comment hiện ra, rồi tải lại.`);
   const reply = page.locator("[data-pmai-reply='1']").first();
-  await reply.click({ timeout: 6000 });
-  await sleep(450);
+  if (!(await reply.count().catch(() => 0))) throw err("UI_CHANGED", `Không thấy nút Trả lời trên comment của ${author}.`);
+  await clickMarkedReply(page);
+  await sleep(500);
   const editor = await editorLocator(page);
   if (!editor) throw err("UI_CHANGED", "Đã bấm Trả lời nhưng không thấy ô gõ.");
   await editor.click({ timeout: 5000 });
@@ -384,6 +481,7 @@ async function likeComments(page, payload = {}) {
 module.exports = {
   cleanAuthor,
   isPageAuthor,
+  isJunkComment,
   commentId,
   initials,
   sendViaFor,
