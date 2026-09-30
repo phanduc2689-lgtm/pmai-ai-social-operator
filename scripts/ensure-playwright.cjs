@@ -27,3 +27,12 @@ try {
 }
 
 console.log("Playwright OK. PMAI dung Google Chrome da cai tren may, khong tai Chrome cua Playwright.");
+
+const rolldown = path.join(root, "node_modules", "rolldown", "dist", "parse-ast-index.mjs");
+if (fs.existsSync(rolldown)) {
+  const head = fs.readFileSync(rolldown, "utf8").slice(0, 240);
+  if (!/import |export |use strict/.test(head)) {
+    fail(2, "node_modules\\rolldown bi hong. Se cai lai.");
+  }
+}
+
