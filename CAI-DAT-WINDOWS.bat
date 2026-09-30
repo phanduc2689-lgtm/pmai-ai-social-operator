@@ -15,6 +15,26 @@ echo === PMAI AI Social Operator ===
 echo Thu muc: %cd%
 echo.
 
+REM Node 24 doc sai file .mjs neu duong dan co dau cach (vi du "PM TRAVEL").
+echo %cd% | find " " >nul
+if not errorlevel 1 (
+  echo Duong dan co dau cach. Gan o dia ao de Node 24 doc dung JavaScript.
+  for %%D in (P Q R S T) do (
+    subst %%D: "%cd%" >nul 2>&1
+    if exist %%D:\package.json (
+      %%D:
+      cd \
+      echo Dang cai tu %%D:\
+      goto mapped
+    )
+    subst %%D: /d >nul 2>&1
+  )
+  echo Khong gan duoc o dia ao. Doi thu muc sang F:\pmai roi chay lai.
+  pause
+  exit /b 1
+)
+:mapped
+
 if not exist package.json (
   echo Thieu package.json.
   echo Neu ban tai ZIP: vao dung thu muc co file CAI-DAT-WINDOWS.bat va package.json.
@@ -35,10 +55,19 @@ if not exist node_modules (
   echo [1/3] node_modules da co.
 )
 
-echo [2/3] Cai Chrome cho Playwright (lan dau)...
-call npx playwright install chrome
-if errorlevel 1 (
-  echo playwright install chrome loi — van co the dung neu da cai Google Chrome.
+echo [2/3] Kiem tra Playwright. Khong chay "npx playwright install chrome" — lenh do loi tren Node 24.
+node scripts\ensure-playwright.cjs
+if errorlevel 2 (
+  echo Playwright hong hoac thieu. Dang cai lai playwright@1.63.0 ...
+  if exist node_modules\playwright rmdir /s /q node_modules\playwright
+  if exist node_modules\playwright-core rmdir /s /q node_modules\playwright-core
+  call npm install playwright@1.63.0 --save-dev --no-fund --no-audit
+  node scripts\ensure-playwright.cjs
+  if errorlevel 1 (
+    echo Van loi. Xoa ca thu muc node_modules roi chay lai file nay.
+    pause
+    exit /b 1
+  )
 )
 
 echo.
