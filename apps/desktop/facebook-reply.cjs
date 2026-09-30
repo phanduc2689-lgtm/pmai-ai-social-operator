@@ -16,6 +16,25 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function foldText(value) {
+  return String(value || "")
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .replace(/[‐‑‒–—−]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKC");
+}
+
+function bodyNeedles(body) {
+  const folded = foldText(body);
+  if (!folded) return [];
+  const needles = [folded.slice(0, 48)];
+  if (folded.length > 20) needles.push(folded.slice(0, 22));
+  if (folded.length > 36) needles.push(folded.slice(10, 40));
+  return [...new Set(needles.filter((needle) => needle.length >= 8))];
+}
+
 function cleanAuthor(author) {
   return String(author || "")
     .replace(/\s+/g, " ")
@@ -233,13 +252,17 @@ async function scrollCommentPane(page) {
 }
 
 async function openCommentList(page) {
-  const count = page.getByText(/\d+\s*(bình luận|comments?)/i).first();
-  if (await count.isVisible().catch(() => false)) {
-    await count.click({ timeout: 4000 }).catch(() => {});
-    await sleep(700);
+  const dialogOpen = await page.locator('[role="dialog"]').first().isVisible().catch(() => false);
+  if (!dialogOpen) {
+    const count = page.getByText(/\d+\s*(bình luận|comments?)/i).first();
+    if (await count.isVisible().catch(() => false)) {
+      await count.click({ timeout: 4000 }).catch(() => {});
+      await sleep(700);
+    }
   }
+  const scope = dialogOpen ? page.locator('[role="dialog"]').first() : page;
   for (let i = 0; i < 6; i += 1) {
-    const more = page
+    const more = scope
       .getByRole("button", { name: /xem thêm bình luận|view more comments|xem thêm câu trả lời|view more replies|xem các bình luận trước|xem thêm/i })
       .first();
     if (!(await more.isVisible().catch(() => false))) break;
@@ -248,35 +271,79 @@ async function openCommentList(page) {
   }
 }
 
+async function scrollCommentTo(page, mode) {
+  return page.evaluate((where) => {
+    const dialog = document.querySelector('[role="dialog"]') || document.body;
+    let scroller = null;
+    let best = 0;
+    for (const el of [dialog, ...dialog.querySelectorAll("div")]) {
+      const delta = el.scrollHeight - el.clientHeight;
+      if (delta > best && el.clientHeight > 140) {
+        best = delta;
+        scroller = el;
+      }
+    }
+    if (!scroller) {
+      if (where === "top") window.scrollTo(0, 0);
+      else window.scrollBy(0, 640);
+      return where === "top";
+    }
+    if (where === "top") {
+      const before = scroller.scrollTop;
+      scroller.scrollTop = 0;
+      return before > 12;
+    }
+    const before = scroller.scrollTop;
+    scroller.scrollTop = Math.min(scroller.scrollHeight, before + Math.max(420, scroller.clientHeight * 0.72));
+    return scroller.scrollTop > before + 8;
+  }, mode);
+}
+
 async function markComment(page, author, body) {
-  const needle = String(body || "").replace(/\s+/g, " ").trim().slice(0, 70);
+  const needles = bodyNeedles(body);
+  if (!needles.length) return false;
   return page.evaluate(
-    ({ authorName, snippet }) => {
+    ({ authorName, needles: parts }) => {
       document.querySelectorAll("[data-pmai-target],[data-pmai-reply],[data-pmai-send],[data-pmai-like]").forEach((el) => {
         el.removeAttribute("data-pmai-target");
         el.removeAttribute("data-pmai-reply");
         el.removeAttribute("data-pmai-send");
         el.removeAttribute("data-pmai-like");
       });
+      const fold = (value) =>
+        String(value || "")
+          .replace(/[\u200b-\u200d\ufeff]/g, "")
+          .replace(/[‐‑‒–—−]/g, "-")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase()
+          .normalize("NFKC");
       const replyRe = /^(trả lời|phản hồi|reply)\b/i;
       const likeRe = /^(thích|like)\b/i;
       const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\s+/g, " ").trim();
-      const wantedAuthor = authorName.replace(/\s+/g, " ").trim().toLowerCase().normalize("NFKC");
-      const snippetFold = snippet.toLowerCase().normalize("NFKC");
-      const buttons = [...document.querySelectorAll('[role="button"]')].filter((button) => replyRe.test(labelOf(button)));
+      const wantedAuthor = fold(authorName);
+      const root = document.querySelector('[role="dialog"]') || document;
+      const buttons = [...root.querySelectorAll('[role="button"], a, span, div')].filter((el) => {
+        const label = labelOf(el);
+        if (!replyRe.test(label)) return false;
+        const own = String(el.innerText || "").replace(/\s+/g, " ").trim();
+        if (!el.getAttribute("aria-label") && own.length > 28) return false;
+        return true;
+      });
       let best = null;
       let bestLen = Infinity;
       let bestButton = null;
       for (const button of buttons) {
         let node = button.parentElement;
-        for (let depth = 0; depth < 16 && node; depth += 1) {
+        for (let depth = 0; depth < 14 && node; depth += 1) {
           const text = String(node.innerText || "").replace(/\s+/g, " ").trim();
-          const folded = text.toLowerCase().normalize("NFKC");
-          if (folded.includes(wantedAuthor) && folded.includes(snippetFold) && text.length < bestLen && text.length < 2400) {
+          const folded = fold(text);
+          const hit = folded.includes(wantedAuthor) && parts.some((needle) => needle && folded.includes(needle));
+          if (hit && text.length < bestLen && text.length < 1800) {
             best = node;
             bestLen = text.length;
             bestButton = button;
-            if (text.length < 900) break;
+            if (text.length < 700) break;
           }
           node = node.parentElement;
         }
@@ -284,13 +351,25 @@ async function markComment(page, author, body) {
       if (!best) return false;
       best.setAttribute("data-pmai-target", "1");
       if (bestButton) bestButton.setAttribute("data-pmai-reply", "1");
-      const like = [...best.querySelectorAll('[role="button"]')].find((button) => likeRe.test(labelOf(button)));
+      const like = [...best.querySelectorAll('[role="button"], span, div')].find((button) => likeRe.test(labelOf(button)) && labelOf(button).length < 24);
       if (like) like.setAttribute("data-pmai-like", "1");
       best.scrollIntoView({ block: "center", inline: "nearest" });
       return true;
     },
-    { authorName: cleanAuthor(author), snippet: needle },
+    { authorName: cleanAuthor(author), needles },
   );
+}
+
+async function locateComment(page, author, body) {
+  await scrollCommentTo(page, "top");
+  await sleep(280);
+  for (let i = 0; i < 16; i += 1) {
+    if (await markComment(page, author, body)) return true;
+    const moved = await scrollCommentTo(page, "down");
+    await sleep(260);
+    if (!moved && i > 1) break;
+  }
+  return false;
 }
 
 async function markSend(page) {
@@ -403,11 +482,10 @@ async function replyToComment(page, payload = {}) {
   const body = String(payload.body || "");
   const text = String(payload.text || "").trim();
   if (!author || !body || !text) throw err("NOT_READY", "Thiếu comment hoặc câu trả lời.");
-  let marked = await markComment(page, author, body);
+  let marked = await locateComment(page, author, body);
   if (!marked) {
     await openCommentList(page);
-    await scrollCommentPane(page);
-    marked = await markComment(page, author, body);
+    marked = await locateComment(page, author, body);
   }
   if (!marked) throw err("UI_CHANGED", `Không thấy comment của ${author} trên Chrome. Mở đúng bài, kéo comment hiện ra, rồi tải lại.`);
   const reply = page.locator("[data-pmai-reply='1']").first();
@@ -451,7 +529,7 @@ async function replyToComment(page, payload = {}) {
 }
 
 async function clickLike(page, author, body) {
-  const marked = await markComment(page, author, body);
+  const marked = await locateComment(page, author, body);
   if (!marked) return false;
   const like = page.locator("[data-pmai-like='1']").first();
   if (!(await like.count().catch(() => 0))) return false;
