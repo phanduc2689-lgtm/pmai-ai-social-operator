@@ -308,7 +308,11 @@ export function useOperator() {
     pushLog({ action: "Tiếp tục", target: "Hàng đợi", detail: "Chạy tiếp từ chỗ đã dừng", result: "OK" });
   }
 
-  async function runLiveReplies(ids: string[]) {
+  function commentKey(author: string, body: string) {
+  return `${author.replace(/\s+/g, " ").trim()}\n${body.replace(/\s+/g, " ").trim().slice(0, 160)}`;
+}
+
+async function runLiveReplies(ids: string[]) {
     const pool = linesRef.current;
     if (busyRef.current || pool.length === 0 || !urlState.ok) return;
     const runId = bumpRun();
@@ -316,100 +320,110 @@ export function useOperator() {
     setRunning("reply");
     setLiveMode(true);
     setScanError("");
-    const hadSample = isSampleThread(commentsRef.current);
-    if (hadSample) await scanLive(true);
-    const targetIds = hadSample
-      ? commentsRef.current.filter((row) => row.role === "customer" && !row.reply).map((row) => row.id)
-      : ids;
-    const queue = commentsRef.current.filter(
-      (row) => targetIds.includes(row.id) && row.role === "customer" && !row.reply && !isSampleThread([row]),
-    );
-    if (queue.length === 0) {
-      const message = scanError || "Chưa đọc được comment trên Chrome. Gắn Chrome, mở đúng bài, rồi bấm Tải comment.";
-      setScanError(message);
-      pushLog({ action: "Lỗi Chrome", target: "Hàng đợi", detail: message, result: "FAIL" });
-      setRunning(null);
-      busyRef.current = false;
-      return;
+    if (isSampleThread(commentsRef.current)) {
+      setComments([]);
+      commentsRef.current = [];
     }
     const pageName = destination?.name || identity?.name || "";
-    pushLog({ action: "Mở bài", target: "Chrome", detail: postUrl.trim(), result: "OK" });
+    const real = commentsRef.current.filter((row) => row.role === "customer" && !isSampleThread([row]));
+    const selected = real.filter((row) => ids.includes(row.id) && !row.reply);
+    const onlyKeys = selected.length > 0 && selected.length < real.length ? selected.map((row) => commentKey(row.author, row.body)) : [];
+    const doneKeys = commentsRef.current.filter((row) => row.reply).map((row) => commentKey(row.author, row.body));
+    pushLog({ action: "Mở bài", target: "Chrome", detail: `${postUrl.trim()} · kéo và trả lời bằng mẫu ngẫu nhiên`, result: "OK" });
     let lastLine: string | null = null;
     let failures = 0;
+    let sent = 0;
+    let reset = true;
     try {
-      for (let index = 0; index < queue.length; index += 1) {
+      for (let step = 0; step < 40; step += 1) {
         await gate(runId);
-        const comment = queue[index];
-        const id = comment.id;
-        if (!comment || comment.role !== "customer" || comment.reply) {
-          pushLog({
-            action: "Bỏ qua",
-            target: comment?.author ?? id,
-            detail: "Đã có reply hoặc là bài của page",
-            result: "SKIP",
-          });
-          continue;
-        }
         const text = pickReply(linesRef.current, lastLine);
         lastLine = text;
-        const via: "arrow" | "enter" = index % 3 === 2 ? "enter" : "arrow";
-        setActiveId(id);
-        setPhase({ type: "typing", commentId: id, draft: "", full: text, progress: 0.08 });
-        pushLog({ action: "Bấm Trả lời", target: comment.author, detail: "Chrome CDP", result: "OK" });
-        const timer = window.setInterval(() => {
-          setPhase((prev) => {
-            if (prev.type !== "typing" || prev.commentId !== id) return prev;
-            const progress = Math.min(0.9, prev.progress + 0.06);
-            const count = Math.max(1, Math.floor(text.length * progress));
-            return { ...prev, progress, draft: text.slice(0, count) };
-          });
-        }, 180);
-        const res = await hostInvoke<{ via: "arrow" | "enter"; typedMs: number; liked: boolean }>("chrome.replyOne", {
+        setPhase({ type: "scrolling", commentId: "live" });
+        const res = await hostInvoke<{
+          done: boolean;
+          skipped?: boolean;
+          author: string;
+          body: string;
+          key: string;
+          via: "enter";
+          typedMs: number;
+          liked: boolean;
+          detail?: string;
+        }>("chrome.replyNext", {
           url: postUrl.trim(),
-          author: comment.author,
-          body: comment.body,
-          text,
-          via,
-          likeAfter: likeRef.current && !comment.liked,
           pageName,
+          text,
+          likeAfter: likeRef.current,
+          reset,
+          doneKeys,
+          onlyKeys,
         });
-        window.clearInterval(timer);
-        if (ctrl.current.runId !== runId) {
-          pushLog({ action: "Dừng", target: comment.author, detail: "Comment đang gõ vẫn gửi trên Chrome", result: "SKIP" });
-          break;
-        }
+        reset = false;
+        if (ctrl.current.runId !== runId) break;
         if (!res.ok || !res.data) {
           failures += 1;
           const message = res.error?.message ?? "Không gửi được";
           setScanError(message);
-          pushLog({ action: "Lỗi Chrome", target: comment.author, detail: message, result: "FAIL" });
+          pushLog({ action: "Lỗi Chrome", target: "Bài viết", detail: message, result: "FAIL" });
           if (failures >= 3 || /checkpoint|captcha/i.test(message)) break;
           continue;
         }
+        if (res.data.done) break;
+        const key = res.data.key || commentKey(res.data.author, res.data.body);
+        if (!doneKeys.includes(key)) doneKeys.push(key);
+        if (res.data.skipped) {
+          failures += 1;
+          pushLog({
+            action: "Bỏ qua",
+            target: res.data.author || "Comment",
+            detail: res.data.detail || "Không mở được ô Trả lời",
+            result: "SKIP",
+          });
+          if (failures >= 5) break;
+          continue;
+        }
         failures = 0;
-        const used = res.data.via;
+        sent += 1;
         const replyAt = new Date().toISOString();
-        const likedNow = Boolean(res.data.liked);
-        commentsRef.current = commentsRef.current.map((row) =>
-          row.id === id ? { ...row, reply: text, replyAt, liked: row.liked || likedNow } : row,
-        );
+        const existing = commentsRef.current.find((row) => commentKey(row.author, row.body) === key);
+        const activeId = existing?.id || `fb-live-${sent}`;
+        if (existing) {
+          commentsRef.current = commentsRef.current.map((row) =>
+            row.id === existing.id ? { ...row, reply: text, replyAt, liked: row.liked || Boolean(res.data?.liked) } : row,
+          );
+        } else {
+          const row = asThread({
+            id: activeId,
+            author: res.data.author,
+            body: res.data.body,
+            liked: Boolean(res.data.liked),
+            role: "customer",
+            timeLabel: "",
+            initials: res.data.author.slice(0, 2).toUpperCase(),
+            tone: 0,
+          });
+          row.reply = text;
+          row.replyAt = replyAt;
+          commentsRef.current = [...commentsRef.current, row];
+        }
         setComments(commentsRef.current);
-        setPhase({ type: "sending", commentId: id, via: used, draft: text });
+        setActiveId(activeId);
+        setPhase({ type: "sending", commentId: activeId, via: "enter", draft: text });
         pushLog({
-          action: used === "arrow" ? "Gửi mũi tên" : "Gửi Enter",
-          target: comment.author,
-          detail: `${(res.data.typedMs / 1000).toFixed(1)} giây trên Chrome · ${text}`,
+          action: "Gửi Enter",
+          target: res.data.author,
+          detail: `${(res.data.typedMs / 1000).toFixed(1)} giây · ${text}`,
           result: "OK",
         });
-        if (res.data.liked) {
-          pushLog({ action: "Like", target: comment.author, detail: "Kèm sau reply", result: "OK" });
-        }
-        await sleep(200, runId);
+        if (res.data.liked) pushLog({ action: "Like", target: res.data.author, detail: "Kèm sau reply", result: "OK" });
+        await sleep(350, runId);
       }
       if (ctrl.current.runId === runId) {
-        pushLog({ action: "Xong hàng đợi", target: "Chrome", detail: `${queue.length} comment`, result: "OK" });
+        pushLog({ action: "Xong hàng đợi", target: "Chrome", detail: `${sent} comment đã trả lời`, result: sent ? "OK" : "SKIP" });
         setPhase({ type: "idle" });
         setActiveId(null);
+        if (!sent) setScanError("Không thấy comment khách trong hộp thoại. Mở đúng bài, kéo comment hiện ra, rồi chạy lại.");
       }
     } catch (error) {
       if (!(error instanceof QueueAbort)) throw error;
