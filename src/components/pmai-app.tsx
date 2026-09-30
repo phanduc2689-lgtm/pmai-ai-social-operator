@@ -112,8 +112,12 @@ class BootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
               style={{ marginTop: 16, width: "auto", padding: "0 16px" }}
               onClick={() => {
                 try {
-                  localStorage.removeItem("pmai.store.v2");
-                  localStorage.removeItem("pmai.store.v1");
+                  const keys = [];
+                  for (let i = 0; i < localStorage.length; i += 1) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith("pmai.")) keys.push(key);
+                  }
+                  keys.forEach((key) => localStorage.removeItem(key));
                 } catch {
                   /* ignore */
                 }
@@ -180,7 +184,7 @@ function PmaiShell() {
           })}
         </nav>
         <p style={{ padding: "12px 16px", fontSize: 11, color: "var(--color-subtle)" }}>
-          v2.2 · {snap.sessions.length || 1} session · local
+          v2.2.3 · {snap.sessions.length || 1} session · local
         </p>
       </aside>
 
