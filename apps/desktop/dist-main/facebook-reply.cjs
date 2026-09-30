@@ -539,6 +539,163 @@ async function clickLike(page, author, body) {
   return true;
 }
 
+async function markNextOpen(page, payload = {}) {
+  return page.evaluate(
+    ({ pageName, doneKeys, onlyKeys }) => {
+      document.querySelectorAll("[data-pmai-target],[data-pmai-reply],[data-pmai-send],[data-pmai-like]").forEach((el) => {
+        el.removeAttribute("data-pmai-target");
+        el.removeAttribute("data-pmai-reply");
+        el.removeAttribute("data-pmai-send");
+        el.removeAttribute("data-pmai-like");
+      });
+      const replyRe = /^(trả lời|phản hồi|reply)\b/i;
+      const likeRe = /^(thích|like)\b/i;
+      const timeLineRe = /^(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])$/i;
+      const timeRe = /(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong|just now|\d+\s*[smhdw])/i;
+      const nameTimeRe = /^(.{2,80}?)\s*[·•|–—-]\s*(\d+\s*(giây|phút|giờ|ngày|tuần|tháng|năm)|vừa xong)$/i;
+      const skipLine =
+        /^(thích|like|bỏ thích|unlike|trả lời|phản hồi|reply|chia sẻ|share|xem thêm|gửi tin nhắn|nhắn tin|message|chung|công khai|public|ẩn|hide|bỏ ẩn|xem bản dịch|theo dõi|follow|tác giả|author)\b/i;
+      const labelOf = (el) => String(el.getAttribute("aria-label") || el.innerText || "").replace(/\s+/g, " ").trim();
+      const tidy = (value) =>
+        String(value || "")
+          .replace(/\s+/g, " ")
+          .replace(/\s+(tác giả|author|top fan|người đóng góp hàng đầu)$/i, "")
+          .trim();
+      const fold = (value) =>
+        String(value || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase()
+          .normalize("NFKC");
+      const pageFold = fold(String(pageName || "").split(/[·•|]/)[0].split(/[-–—]/)[0]);
+      const done = new Set(Array.isArray(doneKeys) ? doneKeys : []);
+      const only = new Set(Array.isArray(onlyKeys) ? onlyKeys : []);
+      const root = document.querySelector('[role="dialog"]') || document.body;
+      const buttons = [...root.querySelectorAll('[role="button"]')].filter((button) => replyRe.test(labelOf(button)));
+      for (const button of buttons) {
+        let node = button.parentElement;
+        let best = null;
+        let bestLen = Infinity;
+        for (let depth = 0; depth < 16 && node; depth += 1) {
+          const raw = String(node.innerText || "");
+          const text = raw.replace(/\s+/g, " ").trim();
+          if (text.length > 12 && text.length < bestLen && text.length < 2200 && timeRe.test(raw)) {
+            const replies = [...node.querySelectorAll('[role="button"]')].filter((item) => replyRe.test(labelOf(item)));
+            if (replies.length > 0 && replies.length <= 8) {
+              best = node;
+              bestLen = text.length;
+              if (replies.length <= 2 && text.length < 900) break;
+            }
+          }
+          node = node.parentElement;
+        }
+        if (!best || best.getAttribute("data-pmai-done") === "1") continue;
+        const lines = String(best.innerText || "")
+          .split(/\n/)
+          .map((line) => line.replace(/\s+/g, " ").trim())
+          .filter(Boolean);
+        let author = "";
+        const bodyLines = [];
+        for (const line of lines) {
+          const named = line.match(nameTimeRe);
+          if (named && !author) {
+            author = tidy(named[1]);
+            continue;
+          }
+          if (!author) {
+            if (line.length >= 2 && line.length <= 80 && !skipLine.test(line) && !timeLineRe.test(line)) author = tidy(line);
+            continue;
+          }
+          if (replyRe.test(line) || likeRe.test(line)) break;
+          if (timeLineRe.test(line) || skipLine.test(line)) continue;
+          bodyLines.push(line);
+        }
+        const body = bodyLines.join(" ").replace(/\s+/g, " ").trim();
+        if (!author || body.length < 2) continue;
+        const authorFold = fold(author);
+        if (pageFold && pageFold.length >= 3 && (authorFold === pageFold || authorFold.startsWith(`${pageFold} `))) continue;
+        const key = `${author}\n${body.slice(0, 160)}`;
+        if (done.has(key)) continue;
+        if (only.size && !only.has(key)) continue;
+        best.setAttribute("data-pmai-target", "1");
+        button.setAttribute("data-pmai-reply", "1");
+        const like = [...best.querySelectorAll('[role="button"]')].find((item) => likeRe.test(labelOf(item)) && labelOf(item).length < 24);
+        if (like) like.setAttribute("data-pmai-like", "1");
+        best.scrollIntoView({ block: "center", inline: "nearest" });
+        return { author, body, key };
+      }
+      return null;
+    },
+    {
+      pageName: payload.pageName || "",
+      doneKeys: Array.isArray(payload.doneKeys) ? payload.doneKeys : [],
+      onlyKeys: Array.isArray(payload.onlyKeys) ? payload.onlyKeys : [],
+    },
+  );
+}
+
+async function replyNext(page, payload = {}) {
+  await ensurePost(page, payload.url);
+  assertSafe(page);
+  const text = String(payload.text || "").trim();
+  if (!text) throw err("NOT_READY", "Chưa có mẫu trả lời.");
+  if (payload.reset) {
+    await openCommentList(page);
+    await scrollCommentTo(page, "top");
+    await sleep(450);
+  }
+  let picked = await markNextOpen(page, payload);
+  if (!picked) {
+    const moved = await scrollCommentTo(page, "down");
+    await sleep(420);
+    picked = await markNextOpen(page, payload);
+    if (!picked && moved) {
+      await sleep(280);
+      picked = await markNextOpen(page, payload);
+    }
+  }
+  if (!picked) return { done: true, author: "", body: "", key: "", via: "enter", typedMs: 0, liked: false };
+  await clickMarkedReply(page);
+  await sleep(500);
+  const editor = await editorLocator(page);
+  if (!editor) {
+    return {
+      done: false,
+      skipped: true,
+      author: picked.author,
+      body: picked.body,
+      key: picked.key,
+      via: "enter",
+      typedMs: 0,
+      liked: false,
+      detail: "Không mở được ô Trả lời",
+    };
+  }
+  await editor.click({ timeout: 5000 });
+  await sleep(160);
+  const typedMs = await typeHuman(page, text);
+  await page.keyboard.press("Enter");
+  await sleep(450);
+  const leftover = await editor.innerText().catch(() => "");
+  if (leftover && text.slice(0, 18) && leftover.includes(text.slice(0, 18))) {
+    await page.keyboard.press("Enter");
+    await sleep(350);
+  }
+  await page.evaluate(() => {
+    const card = document.querySelector("[data-pmai-target='1']");
+    if (card) card.setAttribute("data-pmai-done", "1");
+  });
+  let liked = false;
+  if (payload.likeAfter) {
+    const like = page.locator("[data-pmai-like='1']").first();
+    if ((await like.count().catch(() => 0)) && (await like.isVisible().catch(() => false))) {
+      await like.click({ timeout: 3000 }).catch(() => {});
+      liked = true;
+    }
+  }
+  return { done: false, skipped: false, author: picked.author, body: picked.body, key: picked.key, via: "enter", typedMs, liked };
+}
+
 async function likeComments(page, payload = {}) {
   await ensurePost(page, payload.url);
   const targets = Array.isArray(payload.targets) ? payload.targets : [];
@@ -569,5 +726,6 @@ module.exports = {
   collectComments,
   scanPost,
   replyToComment,
+  replyNext,
   likeComments,
 };
