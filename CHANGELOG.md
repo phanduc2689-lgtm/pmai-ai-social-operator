@@ -1,3 +1,11 @@
+# PMAI 2.2.6 — 2026-09-30
+
+Hàng đợi reply tìm lại comment trên Chrome thật, và có nút xóa hồ sơ Chrome.
+
+- Comment đã quét nhưng bị cuộn khỏi hộp thoại thì PMAI kéo từ đầu danh sách cho tới khi thấy đúng tên và câu.
+- Không bấm lại số bình luận khi hộp thoại đang mở, tránh đóng mất danh sách.
+- Tài khoản: nút «Xóa hồ sơ» đóng session và xóa thư mục Chrome của hồ sơ đó nếu cửa sổ đã đóng.
+
 # PMAI 2.2.5 — 2026-09-30
 
 `npm start` không còn chết ở Rolldown trên Node 24 khi thư mục có dấu cách.
