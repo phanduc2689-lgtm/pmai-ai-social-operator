@@ -273,6 +273,19 @@ export class PmaiEngine {
     return s;
   }
 
+  removeSession(sessionId: string) {
+    const index = this.state.sessions.findIndex((x) => x.id === sessionId);
+    if (index < 0) throw new PmaiError("NOT_READY", "Không thấy hồ sơ để xóa.");
+    const [removed] = this.state.sessions.splice(index, 1);
+    if (this.state.activeSessionId === sessionId) {
+      this.state.activeSessionId = this.state.sessions[0]?.id ?? null;
+    }
+    this.syncActiveFromSession();
+    this.log("profile.delete", "OK", removed.profile.name);
+    this.persist();
+    return { id: removed.id, name: removed.profile.name, chromeDirectory: removed.profile.chromeDirectory ?? null };
+  }
+
   private humanDelayMs(): number {
     if (this.forcedHumanPauseMs != null) return Math.max(0, this.forcedHumanPauseMs);
     return HUMAN_PAUSE_MIN_MS + Math.floor(Math.random() * (HUMAN_PAUSE_MAX_MS - HUMAN_PAUSE_MIN_MS + 1));
