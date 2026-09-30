@@ -158,7 +158,7 @@ async function loadPlaywright() {
   try {
     return require("playwright");
   } catch {
-    throw err("CAPABILITY_MISSING", "Chưa cài Playwright. Chạy: npm install && npx playwright install chrome");
+    throw err("CAPABILITY_MISSING", "Chưa cài Playwright. Chạy CAI-DAT-WINDOWS.bat (npm install). Không cần playwright install chrome — PMAI dùng Google Chrome đã cài.");
   }
 }
 
@@ -269,7 +269,7 @@ async function ensureBrowser(profileId) {
     return { mode: existing.mode, reused: true, profileId: profile.id, cdpPort: existing.cdpPort };
   }
   const port = profile.cdpPort || DEFAULT_CDP_PORT;
-  if ((await isCdpUp(port)) && !profile.locked && !portOwnedByOther(port, profile.id)) {
+  if ((await isCdpUp(port)) && !portOwnedByOther(port, profile.id)) {
     try {
       return await connectCdp(port, profile.id);
     } catch {
@@ -277,7 +277,10 @@ async function ensureBrowser(profileId) {
     }
   }
   if (profile.locked && !(await isCdpUp(port))) {
-    throw err("IDLE_BLOCKED", `Đang mở Chrome hồ sơ «${profile.displayName}» nhưng không có CDP.`);
+    throw err(
+      "IDLE_BLOCKED",
+      `Chrome hồ sơ «${profile.displayName}» đang mở nhưng không có cổng điều khiển. Đóng cửa sổ Chrome đó, rồi bấm Chạy hàng đợi để PMAI mở lại.`,
+    );
   }
   const conflict = portOwnedByOther(port, profile.id) || (await isCdpUp(port));
   const usePort = conflict ? await findFreePort(port + 1) : port;
@@ -326,6 +329,16 @@ async function createProfile(payload = {}) {
 
 async function cloneProfile(payload = {}) {
   return store.clonePmaiProfile(payload.sourceId || payload.directory, payload.displayName || payload.name);
+}
+
+async function deleteProfile(payload = {}) {
+  const id = payload.id || payload.directory || payload.profileId;
+  const removed = store.deletePmaiProfile(id);
+  for (const key of [removed.id, id]) {
+    if (key && pool.has(key)) pool.delete(key);
+  }
+  if (lastId === removed.id || lastId === id) lastId = pool.size ? [...pool.keys()][0] : null;
+  return removed;
 }
 
 async function observe(profileId) {
@@ -540,6 +553,37 @@ async function closeBrowser(profileId) {
   lastId = null;
 }
 
+async function ensureReplyPage() {
+  const current = getLive();
+  if (await pageAlive(current)) return current;
+  const profile =
+    (current && current.profileId && store.getProfile(current.profileId)) ||
+    store.pickLoggedInChromeProfile() ||
+    store.listPmaiProfiles()[0] ||
+    null;
+  if (!profile) throw err("NOT_READY", "Chưa có hồ sơ Chrome. Tạo hồ sơ và đăng nhập Facebook trước.");
+  await ensureBrowser(profile.id);
+  return requireLive(profile.id);
+}
+
+async function scanPostComments(payload = {}) {
+  const reply = require("./facebook-reply.cjs");
+  const live = await ensureReplyPage();
+  return reply.scanPost(live.page, payload || {});
+}
+
+async function replyOnComment(payload = {}) {
+  const reply = require("./facebook-reply.cjs");
+  const live = await ensureReplyPage();
+  return reply.replyToComment(live.page, payload || {});
+}
+
+async function likePostComments(payload = {}) {
+  const reply = require("./facebook-reply.cjs");
+  const live = await ensureReplyPage();
+  return reply.likeComments(live.page, payload || {});
+}
+
 module.exports = {
   listProfiles,
   status,
@@ -547,6 +591,7 @@ module.exports = {
   autoConnect,
   createProfile,
   cloneProfile,
+  deleteProfile,
   observe,
   goto,
   typeText,
@@ -555,6 +600,9 @@ module.exports = {
   publishPost,
   screenshotPng,
   closeBrowser,
+  scanPostComments,
+  replyOnComment,
+  likePostComments,
   isCdpUp,
   isComposerCue,
   sessionCount,

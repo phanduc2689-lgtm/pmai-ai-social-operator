@@ -67,6 +67,17 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
     setNewSessionName("");
   }
 
+  async function removeChromeSession(sessionId: string, chromeDirectory?: string) {
+    if (hasElectronHost() && chromeDirectory) {
+      const removed = await hostInvoke<{ id: string }>("chrome.deleteProfile", { directory: chromeDirectory, id: chromeDirectory });
+      if (!removed.ok) {
+        api.setToast(removed.error?.message ?? "Không xóa được hồ sơ Chrome");
+        return;
+      }
+    }
+    await api.removeSession(sessionId);
+  }
+
   return (
     <section className="mx-auto max-w-2xl">
       <h1 className="font-serif text-3xl">Không gian làm việc</h1>
@@ -118,6 +129,13 @@ export function Accounts({ api }: { api: ReturnType<typeof usePmai> }) {
                       Tôi đã đăng nhập
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="h-11 rounded-md border border-danger/40 px-3 text-xs text-danger"
+                    onClick={() => void removeChromeSession(s.id, s.profile.chromeDirectory)}
+                  >
+                    Xóa hồ sơ
+                  </button>
                 </div>
               </div>
               {s.identity?.sessionStatus !== "CONNECTED" ? (

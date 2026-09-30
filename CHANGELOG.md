@@ -1,3 +1,62 @@
+# PMAI 2.2.6 — 2026-09-30
+
+Hàng đợi reply tìm lại comment trên Chrome thật, và có nút xóa hồ sơ Chrome.
+
+- Comment đã quét nhưng bị cuộn khỏi hộp thoại thì PMAI kéo từ đầu danh sách cho tới khi thấy đúng tên và câu.
+- Không bấm lại số bình luận khi hộp thoại đang mở, tránh đóng mất danh sách.
+- Tài khoản: nút «Xóa hồ sơ» đóng session và xóa thư mục Chrome của hồ sơ đó nếu cửa sổ đã đóng.
+
+# PMAI 2.2.5 — 2026-09-30
+
+`npm start` không còn chết ở Rolldown trên Node 24 khi thư mục có dấu cách.
+
+- Đường dẫn `F:\PM TRAVEL\...` làm Node 24 đọc nhầm file `.mjs` thành văn bản khác (`SyntaxError: Unexpected token ']'`).
+- App tự gắn ổ ảo không có dấu cách rồi chạy lại Vite từ ổ đó.
+- Nếu `node_modules\rolldown` không phải file JavaScript, cài đặt báo xóa và cài lại.
+
+# PMAI 2.2.4 — 2026-09-30
+
+Cài đặt Windows không còn chết ở Playwright trên Node 24.
+
+- Bỏ `npx playwright install chrome`. Lệnh đó nổ `SyntaxError` trong `reportActions.js` trên Node 24, và PMAI không dùng Chrome tải về của Playwright.
+- Nếu `node_modules/playwright` bị hỏng, file cài đặt xóa và cài lại `playwright@1.63.0`.
+- App vẫn mở Google Chrome đã cài trên máy, gắn CDP, rồi reply trên bài thật.
+
+# PMAI 2.2.3 — 2026-09-30
+
+Reply lướt và gửi trên Chrome thật. Xóa được dữ liệu local.
+
+- Quét comment trong hộp thoại bài viết: chỉ nhận comment có giờ đăng, bỏ hàng nút «Gửi tin nhắn / Ẩn».
+- Lướt danh sách comment trong dialog, bấm Trả lời, gõ vào ô trả lời — không gõ vào ô «Bình luận dưới tên».
+- Hàng đợi trên app Electron không chạy bài mẫu. Chưa đọc được Chrome thì dừng, không giả lập gửi.
+- «Xóa dữ liệu local» xóa `pmai.reply.v1`. Dữ liệu comment thật không bị kéo lại thành bài mẫu khi mở lại.
+
+# PMAI 2.2.2 — 2026-09-30
+
+Reply bấm được nút Trả lời trên Chrome đang mở.
+
+- Hàng đợi tự gắn lại Chrome nếu hồ sơ còn cổng điều khiển. Không còn dừng ở «Browser chưa launch» khi Chrome vẫn mở.
+- Bỏ dòng rác của Facebook (Gửi tin nhắn, Chung, Ẩn). Chỉ reply comment người thật.
+- Bấm Trả lời ngay trên comment, rồi gõ vào ô vừa hiện.
+
+# PMAI 2.2.1 — 2026-09-30
+
+Hàng đợi reply chạy trên Chrome CDP đã gắn, không còn chỉ khung mẫu.
+
+- Vào bước 3: mở URL bài viết trên Chrome đang gắn, đọc comment thật (nút Trả lời).
+- Chạy hàng đợi: bấm Trả lời, gõ 3–5 giây, gửi mũi tên xanh hoặc Enter, like nếu bật.
+- Badge **Chrome CDP**. Nếu chưa gắn Chrome thì vẫn là **CDP mẫu** và không gửi Facebook.
+- Checkpoint / captcha: dừng, không vượt. Locator đăng bài không đổi.
+
+# PMAI 2.2.0 — 2026-09-29
+
+Phản hồi bình luận hàng loạt. Locator đăng PROFILE / PAGE / GROUP **không đổi**.
+
+- Menu **Phản hồi bình luận**: chọn Facebook Profile/Page, Browser Profile, Facebook Identity, Destination. Chỉ đích READY.
+- Dán URL bài viết. Mỗi dòng trong hộp reply là một câu; hàng đợi lấy ngẫu nhiên.
+- Bấm Trả lời, gõ 3–5 giây, gửi bằng mũi tên hoặc Enter, rồi sang comment kế. Like kèm hoặc like hàng loạt.
+- Nhật ký reply lưu trên máy. Gemini: ô API key, chưa gọi API.
+
 # PMAI 2.1.0 — 2026-09-22
 
 Đăng theo lịch + hàng đợi. Locator PROFILE / PAGE / GROUP **không đổi** (baseline v2.0 giữ nguyên).
