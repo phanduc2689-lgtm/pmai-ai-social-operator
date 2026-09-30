@@ -64,7 +64,7 @@ export function OperatorApp() {
             );
           })}
         </nav>
-        <p className="aside-foot">v2.2.1 · phản hồi bình luận · local</p>
+        <p className="aside-foot">v2.2.3 · phản hồi bình luận · local</p>
       </aside>
       <div className="col">
         <header className="header">
@@ -483,7 +483,7 @@ function StepQueue({ op }: { op: Operator }) {
             Tải comment trên Chrome
           </button>
           <button type="button" className="btn-ghost" onClick={op.resetThread} disabled={Boolean(op.running)}>
-            Đặt lại bài
+            Xóa dữ liệu local
           </button>
           <button type="button" className="btn-ghost" onClick={() => op.goto(2)} disabled={Boolean(op.running)}>
             Quay lại bài viết
