@@ -64,7 +64,7 @@ export function OperatorApp() {
             );
           })}
         </nav>
-        <p className="aside-foot">v2.2.3 · phản hồi bình luận · local</p>
+        <p className="aside-foot">v2.2.4 · phản hồi bình luận · local</p>
       </aside>
       <div className="col">
         <header className="header">
@@ -431,7 +431,7 @@ function StepQueue({ op }: { op: Operator }) {
           {op.scanning
             ? "Đang đọc comment trên Chrome đã gắn."
             : op.liveMode
-              ? `${done}/${op.customers.length} đã gửi trên bài thật. Gõ 3–5 giây trong ô Trả lời, rồi mũi tên xanh hoặc Enter.`
+              ? `${done}/${op.customers.length} đã gửi trên bài thật. Chrome kéo comment và trả lời từng cái bằng mẫu ngẫu nhiên.`
               : `${done}/${op.customers.length} đã gửi trên khung mẫu. Chưa đụng Facebook.`}
         </p>
         {op.scanError ? <p className="warn-text">{op.scanError}</p> : null}
